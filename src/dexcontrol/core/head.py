@@ -19,11 +19,11 @@ from typing import Literal
 
 import numpy as np
 from dexcomm import call_service
+from dexcomm.serialization.protobuf import control_msg_pb2, control_query_pb2
 from jaxtyping import Float
 
 from dexcontrol.config.core import HeadConfig
 from dexcontrol.core.component import RobotJointComponent
-from dexcontrol.proto import dexcontrol_msg_pb2, dexcontrol_query_pb2
 from dexcontrol.utils.comm_helper import get_zenoh_config_path
 from dexcontrol.utils.os_utils import resolve_key_name
 
@@ -52,7 +52,7 @@ class Head(RobotJointComponent):
         super().__init__(
             state_sub_topic=configs.state_sub_topic,
             control_pub_topic=configs.control_pub_topic,
-            state_message_type=dexcontrol_msg_pb2.MotorStateWithTorque,
+            state_message_type=control_msg_pb2.MotorStateWithTorque,
             joint_name=configs.joint_name,
             joint_limit=configs.joint_limit
             if hasattr(configs, "joint_limit")
@@ -159,7 +159,7 @@ class Head(RobotJointComponent):
             )
 
         # Create and send control message
-        control_msg = dexcontrol_msg_pb2.MotorPosVelCommand()
+        control_msg = control_msg_pb2.MotorPosVelCommand()
         control_msg.pos.extend(joint_pos.tolist())
         control_msg.vel.extend(joint_vel.tolist())
         self._publish_control(control_msg)
@@ -182,8 +182,8 @@ class Head(RobotJointComponent):
             ValueError: If an invalid mode is specified.
         """
         mode_map = {
-            "enable": dexcontrol_query_pb2.SetHeadMode.Mode.ENABLE,
-            "disable": dexcontrol_query_pb2.SetHeadMode.Mode.DISABLE,
+            "enable": control_query_pb2.SetHeadMode.Mode.ENABLE,
+            "disable": control_query_pb2.SetHeadMode.Mode.DISABLE,
         }
 
         if mode not in mode_map:
@@ -191,13 +191,13 @@ class Head(RobotJointComponent):
                 f"Invalid mode: {mode}. Must be one of {list(mode_map.keys())}"
             )
 
-        query_msg = dexcontrol_query_pb2.SetHeadMode()
+        query_msg = control_query_pb2.SetHeadMode()
         query_msg.mode = mode_map[mode]
 
         call_service(
             self._mode_query_topic,
             request=query_msg,
-            timeout=1.0,
+            timeout=5.0,
             config=get_zenoh_config_path(),
             request_serializer=lambda x: x.SerializeToString(),
             response_deserializer=None,

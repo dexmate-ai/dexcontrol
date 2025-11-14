@@ -15,11 +15,11 @@ communication. It handles joint position and velocity control and state monitori
 """
 
 import numpy as np
+from dexcomm.serialization.protobuf import control_msg_pb2
 from jaxtyping import Float
 
 from dexcontrol.config.core import TorsoConfig
 from dexcontrol.core.component import RobotJointComponent
-from dexcontrol.proto import dexcontrol_msg_pb2
 
 
 class Torso(RobotJointComponent):
@@ -46,7 +46,7 @@ class Torso(RobotJointComponent):
         super().__init__(
             state_sub_topic=configs.state_sub_topic,
             control_pub_topic=configs.control_pub_topic,
-            state_message_type=dexcontrol_msg_pb2.MotorStateWithCurrent,
+            state_message_type=control_msg_pb2.MotorStateWithCurrent,
             joint_name=configs.joint_name,
             joint_limit=configs.joint_limit
             if hasattr(configs, "joint_limit")
@@ -115,7 +115,7 @@ class Torso(RobotJointComponent):
             )
 
         # Create and send control message
-        control_msg = dexcontrol_msg_pb2.MotorPosVelCommand()
+        control_msg = control_msg_pb2.MotorPosVelCommand()
         control_msg.pos.extend(joint_pos.tolist())
         control_msg.vel.extend(joint_vel.tolist())
         self._publish_control(control_msg)

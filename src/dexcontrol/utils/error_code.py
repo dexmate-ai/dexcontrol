@@ -10,8 +10,6 @@
 
 """Error code interpretation utilities for robot components."""
 
-from typing import Dict
-
 
 class ErrorCodeInterpreter:
     """Interprets error codes for different robot components."""
@@ -139,7 +137,7 @@ class ErrorCodeInterpreter:
 
     @classmethod
     def _interpret_bitmask_errors(
-        cls, error_code: int, error_dict: Dict[int, str]
+        cls, error_code: int, error_dict: dict[int, str]
     ) -> str:
         """
         Interpret bitmask-style error codes.
@@ -220,7 +218,7 @@ def get_error_description(component: str, error_code: int) -> str:
     return ErrorCodeInterpreter.interpret_error(component, error_code)
 
 
-def get_multiple_errors(components_errors: Dict[str, int]) -> Dict[str, str]:
+def get_multiple_errors(components_errors: dict[str, int]) -> dict[str, str]:
     """
     Get error descriptions for multiple components.
 

@@ -13,7 +13,7 @@
 from enum import Enum
 from typing import Any, Literal
 
-from dexcontrol.proto import dexcontrol_query_pb2
+from dexcomm.serialization.protobuf import control_query_pb2
 
 TYPE_SOFTWARE_VERSION = dict[
     Literal["hardware_version", "software_version", "main_hash", "compile_time"], Any
@@ -28,7 +28,7 @@ class ComponentStatus(Enum):
     ERROR = 2
 
 
-def status_to_enum(status: dexcontrol_query_pb2.ComponentStatus) -> ComponentStatus:
+def status_to_enum(status: control_query_pb2.ComponentStatus) -> ComponentStatus:
     """Convert a ComponentStatus protobuf message to a ComponentStatus enum.
 
     Args:
@@ -41,9 +41,9 @@ def status_to_enum(status: dexcontrol_query_pb2.ComponentStatus) -> ComponentSta
         ValueError: If the status value is not recognized.
     """
     status_map = {
-        dexcontrol_query_pb2.ComponentStatus.NORMAL: ComponentStatus.NORMAL,
-        dexcontrol_query_pb2.ComponentStatus.NA: ComponentStatus.NA,
-        dexcontrol_query_pb2.ComponentStatus.ERROR: ComponentStatus.ERROR,
+        control_query_pb2.ComponentStatus.NORMAL: ComponentStatus.NORMAL,
+        control_query_pb2.ComponentStatus.NA: ComponentStatus.NA,
+        control_query_pb2.ComponentStatus.ERROR: ComponentStatus.ERROR,
     }
 
     if status not in status_map:
@@ -53,7 +53,7 @@ def status_to_enum(status: dexcontrol_query_pb2.ComponentStatus) -> ComponentSta
 
 
 def status_to_dict(
-    status_msg: dexcontrol_query_pb2.ComponentStates,
+    status_msg: control_query_pb2.ComponentStates,
 ) -> dict[str, dict[str, Any]]:
     """Convert a ComponentStates protobuf message to a dictionary.
 

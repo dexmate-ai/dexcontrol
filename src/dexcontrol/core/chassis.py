@@ -17,12 +17,12 @@ Zenoh communication. It handles steering and wheel velocity control.
 import time
 
 import numpy as np
+from dexcomm.serialization.protobuf import control_msg_pb2
 from dexcomm.utils import RateLimiter
 from jaxtyping import Float
 
 from dexcontrol.config.core import ChassisConfig
 from dexcontrol.core.component import RobotJointComponent
-from dexcontrol.proto import dexcontrol_msg_pb2
 
 
 class ChassisSteer(RobotJointComponent):
@@ -45,7 +45,7 @@ class ChassisSteer(RobotJointComponent):
         super().__init__(
             state_sub_topic=configs.steer_state_sub_topic,
             control_pub_topic=configs.steer_control_pub_topic,
-            state_message_type=dexcontrol_msg_pb2.MotorStateWithCurrent,
+            state_message_type=control_msg_pb2.MotorStateWithCurrent,
             joint_name=configs.steer_joint_name,
         )
 
@@ -57,7 +57,7 @@ class ChassisSteer(RobotJointComponent):
         Args:
             joint_pos: Joint positions as list or numpy array.
         """
-        control_msg = dexcontrol_msg_pb2.MotorPosVelCommand()
+        control_msg = control_msg_pb2.MotorPosVelCommand()
         joint_pos_array = self._convert_joint_cmd_to_array(joint_pos)
         control_msg.pos.extend(joint_pos_array.tolist())
         self._publish_control(control_msg)
@@ -82,7 +82,7 @@ class ChassisDrive(RobotJointComponent):
         super().__init__(
             state_sub_topic=configs.drive_state_sub_topic,
             control_pub_topic=configs.drive_control_pub_topic,
-            state_message_type=dexcontrol_msg_pb2.MotorStateWithCurrent,
+            state_message_type=control_msg_pb2.MotorStateWithCurrent,
             joint_name=configs.drive_joint_name,
         )
 
@@ -94,7 +94,7 @@ class ChassisDrive(RobotJointComponent):
     def _send_velocity_command(
         self, joint_vel: Float[np.ndarray, " 2"] | list[float]
     ) -> None:
-        control_msg = dexcontrol_msg_pb2.MotorVelCommand()
+        control_msg = control_msg_pb2.MotorVelCommand()
         joint_vel_array = self._convert_joint_cmd_to_array(joint_vel)
         control_msg.vel.extend(joint_vel_array.tolist())
         self._publish_control(control_msg)

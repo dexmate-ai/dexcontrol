@@ -140,8 +140,8 @@ class LiveLidarPlotter:
             qualities = scan_data.get("qualities")
 
             # Convert to Cartesian coordinates
-            x = -ranges * np.sin(angles)
-            y = ranges * np.cos(angles)
+            x = ranges * np.cos(angles)
+            y = ranges * np.sin(angles)
 
             # Update scatter plot
             if self.scatter is not None:

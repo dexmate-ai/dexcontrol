@@ -18,12 +18,12 @@ from enum import Enum
 from typing import Any, cast
 
 import numpy as np
+from dexcomm.serialization.protobuf import control_msg_pb2
 from jaxtyping import Float
 from loguru import logger
 
 from dexcontrol.config.core.hand import HandConfig
 from dexcontrol.core.component import RobotComponent, RobotJointComponent
-from dexcontrol.proto import dexcontrol_msg_pb2
 
 
 class HandType(Enum):
@@ -53,7 +53,7 @@ class Hand(RobotJointComponent):
         super().__init__(
             state_sub_topic=configs.state_sub_topic,
             control_pub_topic=configs.control_pub_topic,
-            state_message_type=dexcontrol_msg_pb2.MotorStateWithCurrent,
+            state_message_type=control_msg_pb2.MotorStateWithCurrent,
             joint_name=configs.joint_name,
         )
 
@@ -69,7 +69,7 @@ class Hand(RobotJointComponent):
         Args:
             joint_pos: Joint positions as list or numpy array.
         """
-        control_msg = dexcontrol_msg_pb2.MotorPosCommand()
+        control_msg = control_msg_pb2.MotorPosCommand()
         joint_pos_array = self._convert_joint_cmd_to_array(joint_pos)
         control_msg.pos.extend(joint_pos_array.tolist())
         self._publish_control(control_msg)
@@ -262,7 +262,7 @@ class HandF5D6TouchSensor(RobotComponent):
         """
         super().__init__(
             state_sub_topic=state_sub_topic,
-            state_message_type=dexcontrol_msg_pb2.HandTouchSensorState,
+            state_message_type=control_msg_pb2.HandTouchSensorState,
         )
 
     def get_fingertip_touch_net_force(self) -> Float[np.ndarray, "5"]:
@@ -272,5 +272,5 @@ class HandF5D6TouchSensor(RobotComponent):
             Dictionary containing wrench values and button states.
         """
         state = self._get_state()
-        hand_touch_state = cast(dexcontrol_msg_pb2.HandTouchSensorState, state)
+        hand_touch_state = cast(control_msg_pb2.HandTouchSensorState, state)
         return np.array(hand_touch_state.force)

@@ -20,13 +20,13 @@ from typing import Any, Literal
 import numpy as np
 from dexcomm import Publisher, call_service
 from dexcomm.serialization import serialize_protobuf
+from dexcomm.serialization.protobuf import control_msg_pb2, control_query_pb2
 from dexcomm.utils import RateLimiter
 from jaxtyping import Float
 from loguru import logger
 
 from dexcontrol.config.core.arm import ArmConfig
 from dexcontrol.core.component import RobotComponent, RobotJointComponent
-from dexcontrol.proto import dexcontrol_msg_pb2, dexcontrol_query_pb2
 from dexcontrol.utils.comm_helper import get_zenoh_config_path
 from dexcontrol.utils.os_utils import resolve_key_name
 from dexcontrol.utils.trajectory_utils import generate_linear_trajectory
@@ -55,7 +55,7 @@ class Arm(RobotJointComponent):
         super().__init__(
             state_sub_topic=configs.state_sub_topic,
             control_pub_topic=configs.control_pub_topic,
-            state_message_type=dexcontrol_msg_pb2.MotorStateWithCurrent,
+            state_message_type=control_msg_pb2.MotorStateWithCurrent,
             joint_name=configs.joint_name,
             joint_limit=configs.joint_limit
             if hasattr(configs, "joint_limit")
@@ -118,9 +118,9 @@ class Arm(RobotJointComponent):
             ValueError: If any mode in the list is invalid.
         """
         mode_map = {
-            "position": dexcontrol_query_pb2.SetArmMode.Mode.POSITION,
-            "disable": dexcontrol_query_pb2.SetArmMode.Mode.DISABLE,
-            "release": dexcontrol_query_pb2.SetArmMode.Mode.CURRENT,
+            "position": control_query_pb2.SetArmMode.Mode.POSITION,
+            "disable": control_query_pb2.SetArmMode.Mode.DISABLE,
+            "release": control_query_pb2.SetArmMode.Mode.CURRENT,
         }
 
         for mode in modes:
@@ -133,7 +133,7 @@ class Arm(RobotJointComponent):
             raise ValueError("Arm modes length must match arm DoF (7).")
 
         converted_modes = [mode_map[mode] for mode in modes]
-        query_msg = dexcontrol_query_pb2.SetArmMode(modes=converted_modes)
+        query_msg = control_query_pb2.SetArmMode(modes=converted_modes)
         # Use DexComm's call_service for mode setting
         from dexcontrol.utils.comm_helper import get_zenoh_config_path
 
@@ -152,7 +152,7 @@ class Arm(RobotJointComponent):
         Args:
             joint_pos: Joint positions as numpy array.
         """
-        control_msg = dexcontrol_msg_pb2.MotorPosVelCurrentCommand()
+        control_msg = control_msg_pb2.MotorPosVelCurrentCommand()
         control_msg.pos.extend(joint_pos.tolist())
         self._publish_control(control_msg)
 
@@ -315,7 +315,7 @@ class Arm(RobotJointComponent):
             joint_vel, clip_value=self._joint_vel_limit
         )
 
-        control_msg = dexcontrol_msg_pb2.MotorPosVelCurrentCommand(
+        control_msg = control_msg_pb2.MotorPosVelCurrentCommand(
             pos=list(target_pos),
             vel=list(target_vel),
         )
@@ -344,7 +344,7 @@ class Arm(RobotJointComponent):
         Args:
             message: The message to send to the robot arm.
         """
-        control_msg = dexcontrol_msg_pb2.EndEffectorPassThroughCommand(data=message)
+        control_msg = control_msg_pb2.EndEffectorPassThroughCommand(data=message)
         self._ee_pass_through_publisher.publish(control_msg)
 
 
@@ -362,7 +362,7 @@ class ArmWrenchSensor(RobotComponent):
         """
         super().__init__(
             state_sub_topic=state_sub_topic,
-            state_message_type=dexcontrol_msg_pb2.WrenchState,
+            state_message_type=control_msg_pb2.WrenchState,
         )
 
     def get_wrench_state(self) -> Float[np.ndarray, "6"]:

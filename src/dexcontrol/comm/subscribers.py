@@ -15,7 +15,7 @@ DexControl's default configurations.
 """
 
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from dexcomm import BufferedSubscriber, Subscriber, wait_for_message
 from dexcomm.serialization import deserialize_auto
@@ -56,10 +56,10 @@ except ImportError:
 
 def create_subscriber(
     topic: str,
-    callback: Optional[Callable[[Any], None]] = None,
+    callback: Callable[[Any], None] | None = None,
     buffer_size: int = 1,
-    deserializer: Optional[Callable[[bytes], Any]] = deserialize_auto,
-    config: Optional[Path] = None,
+    deserializer: Callable[[bytes], Any] | None = deserialize_auto,
+    config: Path | None = None,
 ) -> Subscriber:
     """Create a DexComm Subscriber with DexControl defaults.
 
@@ -104,10 +104,10 @@ def create_subscriber(
 
 def create_buffered_subscriber(
     topic: str,
-    callback: Optional[Callable[[Any], None]] = None,
+    callback: Callable[[Any], None] | None = None,
     buffer_size: int = 100,
-    deserializer: Optional[Callable[[bytes], Any]] = deserialize_auto,
-    config: Optional[Path] = None,
+    deserializer: Callable[[bytes], Any] | None = deserialize_auto,
+    config: Path | None = None,
 ) -> BufferedSubscriber:
     """Create a DexComm BufferedSubscriber for data collection.
 
@@ -145,7 +145,7 @@ def create_buffered_subscriber(
 
 def create_camera_subscriber(
     topic: str,
-    callback: Optional[Callable[[Any], None]] = None,
+    callback: Callable[[Any], None] | None = None,
     buffer_size: int = 1,
 ) -> Subscriber:
     """Create a subscriber for RGB camera data.
@@ -174,7 +174,7 @@ def create_camera_subscriber(
 
 def create_depth_subscriber(
     topic: str,
-    callback: Optional[Callable[[Any], None]] = None,
+    callback: Callable[[Any], None] | None = None,
     buffer_size: int = 1,
 ) -> Subscriber:
     """Create a subscriber for depth camera data.
@@ -203,7 +203,7 @@ def create_depth_subscriber(
 
 def create_imu_subscriber(
     topic: str,
-    callback: Optional[Callable[[Any], None]] = None,
+    callback: Callable[[Any], None] | None = None,
     buffer_size: int = 1,
 ) -> Subscriber:
     """Create a subscriber for IMU data.
@@ -230,7 +230,7 @@ def create_imu_subscriber(
 
 def create_lidar_subscriber(
     topic: str,
-    callback: Optional[Callable[[Any], None]] = None,
+    callback: Callable[[Any], None] | None = None,
     buffer_size: int = 1,
 ) -> Subscriber:
     """Create a subscriber for 2D LiDAR data.
@@ -259,7 +259,7 @@ def create_lidar_subscriber(
 
 def create_generic_subscriber(
     topic: str,
-    callback: Optional[Callable[[Any], None]] = None,
+    callback: Callable[[Any], None] | None = None,
     buffer_size: int = 1,
     raw_bytes: bool = False,
 ) -> Subscriber:
@@ -302,7 +302,7 @@ def quick_subscribe(topic: str, callback: Callable[[Any], None]) -> Subscriber:
     return create_subscriber(topic, callback=callback)
 
 
-def wait_for_any_message(topic: str, timeout: float = 5.0) -> Optional[Any]:
+def wait_for_any_message(topic: str, timeout: float = 5.0) -> Any | None:
     """Wait for a message on a topic.
 
     Convenience wrapper around DexComm's wait_for_message.

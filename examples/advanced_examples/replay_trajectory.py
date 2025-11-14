@@ -7,7 +7,6 @@ Replays pre-recorded NPZ trajectory files with optional smoothing and velocity c
 import argparse
 import time
 from pathlib import Path
-from typing import Dict, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,7 +17,7 @@ from scipy.ndimage import gaussian_filter1d
 from dexcontrol.robot import Robot
 
 
-def load_trajectory(filepath: Path) -> tuple[Dict[str, np.ndarray], float]:
+def load_trajectory(filepath: Path) -> tuple[dict[str, np.ndarray], float]:
     """Load trajectory from NPZ file."""
     if not filepath.exists():
         raise FileNotFoundError(f"File not found: {filepath}")
@@ -39,8 +38,8 @@ def load_trajectory(filepath: Path) -> tuple[Dict[str, np.ndarray], float]:
 
 
 def resample_trajectory(
-    trajectory: Dict[str, np.ndarray], speed_factor: float
-) -> Dict[str, np.ndarray]:
+    trajectory: dict[str, np.ndarray], speed_factor: float
+) -> dict[str, np.ndarray]:
     """Resample trajectory by speed factor (>1 = faster, <1 = slower)."""
     if speed_factor == 1.0:
         return trajectory
@@ -63,8 +62,8 @@ def resample_trajectory(
 
 
 def smooth_trajectory(
-    trajectory: Dict[str, np.ndarray], sigma_time: float, hz: float
-) -> Dict[str, np.ndarray]:
+    trajectory: dict[str, np.ndarray], sigma_time: float, hz: float
+) -> dict[str, np.ndarray]:
     """Apply Gaussian smoothing to trajectory.
 
     Args:
@@ -95,8 +94,8 @@ def smooth_trajectory(
 
 
 def compute_velocities(
-    trajectory: Dict[str, np.ndarray], hz: float, smooth_time: float = 0.01
-) -> Dict[str, np.ndarray]:
+    trajectory: dict[str, np.ndarray], hz: float, smooth_time: float = 0.01
+) -> dict[str, np.ndarray]:
     """Compute velocities using finite differences.
 
     Args:
@@ -134,8 +133,8 @@ def compute_velocities(
 
 
 def visualize_trajectory(
-    trajectory: Dict[str, np.ndarray],
-    velocities: Optional[Dict[str, np.ndarray]],
+    trajectory: dict[str, np.ndarray],
+    velocities: dict[str, np.ndarray] | None,
     hz: float,
 ) -> None:
     """Visualize trajectory with separate figures for each part."""
@@ -249,7 +248,7 @@ def visualize_trajectory(
     plt.show()
 
 
-def check_goal_difference(diff: Dict[str, np.ndarray], max_goal_diff: float) -> bool:
+def check_goal_difference(diff: dict[str, np.ndarray], max_goal_diff: float) -> bool:
     """Check maximum absolute joint difference and compare with threshold.
 
     Args:
@@ -260,7 +259,7 @@ def check_goal_difference(diff: Dict[str, np.ndarray], max_goal_diff: float) -> 
         True if all absolute joint deltas are within the allowed threshold.
         False if any joint delta exceeds the threshold (also logs details).
     """
-    max_diff_part: Optional[str] = None
+    max_diff_part: str | None = None
     max_joint_idx: int = -1
     max_diff: float = 0.0
 
@@ -287,12 +286,12 @@ def check_goal_difference(diff: Dict[str, np.ndarray], max_goal_diff: float) -> 
 
 def run_replay_loop(
     robot: Robot,
-    trajectory: Dict[str, np.ndarray],
-    velocities: Optional[Dict[str, np.ndarray]],
+    trajectory: dict[str, np.ndarray],
+    velocities: dict[str, np.ndarray] | None,
     hz: float,
     num_frames: int,
     rate_limiter: RateLimiter,
-    max_goal_diff: Optional[float] = None,
+    max_goal_diff: float | None = None,
 ) -> bool:
     """Run the main trajectory replay loop.
 
@@ -359,7 +358,7 @@ def run_replay_loop(
 
 def replay_trajectory(
     filepath: Path,
-    control_hz: Optional[float] = None,
+    control_hz: float | None = None,
     gaussian_sigma: float = 0.0,
     use_velocity: bool = False,
     velocity_sigma: float = 1.0,

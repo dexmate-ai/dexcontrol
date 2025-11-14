@@ -25,7 +25,6 @@ from omegaconf import DictConfig, OmegaConf
 from dexcontrol.config.sensors.vega_sensors import VegaSensorsConfig
 
 if TYPE_CHECKING:
-    from dexcontrol.sensors.camera.luxonis_camera import LuxonisCameraSensor
     from dexcontrol.sensors.camera.rgb_camera import RGBCameraSensor
     from dexcontrol.sensors.camera.zed_camera import ZedCameraSensor
     from dexcontrol.sensors.imu.chassis_imu import ChassisIMUSensor
@@ -48,8 +47,6 @@ class Sensors:
     if TYPE_CHECKING:
         # Type annotations for dynamically created sensor attributes
         head_camera: ZedCameraSensor
-        left_wrist_camera: LuxonisCameraSensor
-        right_wrist_camera: LuxonisCameraSensor
         base_left_camera: RGBCameraSensor
         base_right_camera: RGBCameraSensor
         base_front_camera: RGBCameraSensor

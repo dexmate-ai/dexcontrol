@@ -30,8 +30,8 @@ def plot_lidar_scan(ranges: np.ndarray, angles: np.ndarray) -> None:
         ranges: Array of range measurements in meters.
         angles: Array of angle measurements in radians.
     """
-    x = -ranges * np.sin(angles)
-    y = ranges * np.cos(angles)
+    x = ranges * np.cos(angles)
+    y = ranges * np.sin(angles)
 
     # Create plot
     plt.figure(figsize=(10, 8))

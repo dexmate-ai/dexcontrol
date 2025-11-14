@@ -30,10 +30,9 @@ from dexcontrol.robot import Robot
 from dexcontrol.utils.constants import COMM_CFG_PATH_ENV_VAR
 
 # Package-level constants
-__version__: str = "0.3.0"  # Current library version
 LIB_PATH: Final[Path] = Path(__file__).resolve().parent
 CFG_PATH: Final[Path] = LIB_PATH / "config"
-MIN_SOC_SOFTWARE_VERSION: int = 286
+MIN_SOC_SOFTWARE_VERSION: int = 298
 
 logger.configure(
     handlers=[

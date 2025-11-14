@@ -16,9 +16,9 @@ Raw API for distance measurements.
 
 import numpy as np
 from dexcomm.serialization import deserialize_protobuf
+from dexcomm.serialization.protobuf import control_msg_pb2
 
 from dexcontrol.comm import create_subscriber
-from dexcontrol.proto import dexcontrol_msg_pb2
 
 
 class UltrasonicSensor:
@@ -41,7 +41,7 @@ class UltrasonicSensor:
         # Create the protobuf subscriber using our clean DexComm integration
         self._subscriber = create_subscriber(
             topic=configs.topic,
-            deserializer=lambda data: deserialize_protobuf(data, dexcontrol_msg_pb2.UltrasonicState),
+            deserializer=lambda data: deserialize_protobuf(data, control_msg_pb2.UltrasonicState),
         )
 
 

@@ -11,7 +11,7 @@
 """Base camera sensor class with common functionality for all camera sensors."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -33,7 +33,7 @@ class BaseCameraSensor(ABC):
             name: Name of the camera sensor
         """
         self._name = name
-        self._camera_info: Optional[Dict[str, Any]] = None
+        self._camera_info: dict[str, Any] | None = None
 
     @abstractmethod
     def shutdown(self) -> None:
@@ -50,29 +50,35 @@ class BaseCameraSensor(ABC):
         """Wait for the camera sensor to start receiving data."""
         pass
 
-    def _query_camera_info(self, info_endpoint: Optional[str]) -> None:
+    def _query_camera_info(self, info_endpoint: str | None) -> None:
         """Query for camera metadata information.
 
         Args:
             info_endpoint: The endpoint to query for camera info
         """
         if not info_endpoint:
-            logger.debug(f"'{self._name}': No info endpoint provided for camera info query.")
+            logger.debug(
+                f"'{self._name}': No info endpoint provided for camera info query."
+            )
             return
 
         try:
-            logger.debug(f"'{self._name}': Querying camera info from '{info_endpoint}'.")
+            logger.debug(
+                f"'{self._name}': Querying camera info from '{info_endpoint}'."
+            )
             self._camera_info = query_json_service(info_endpoint, timeout=2.0)
 
             if self._camera_info:
                 logger.info(f"'{self._name}': Successfully retrieved camera info.")
             else:
-                logger.debug(f"'{self._name}': No camera info available at '{info_endpoint}'.")
+                logger.debug(
+                    f"'{self._name}': No camera info available at '{info_endpoint}'."
+                )
 
         except Exception as e:
             logger.debug(f"'{self._name}': Failed to query camera info: {e}")
 
-    def _get_rtc_signaling_url(self, stream_name: str) -> Optional[str]:
+    def _get_rtc_signaling_url(self, stream_name: str) -> str | None:
         """Extract RTC signaling URL from camera_info for a specific stream.
 
         Args:
@@ -89,7 +95,7 @@ class BaseCameraSensor(ABC):
         stream_info = streams.get(stream_name, {})
         return stream_info.get("signaling_url")
 
-    def _derive_info_endpoint_from_topic(self, topic: str) -> Optional[str]:
+    def _derive_info_endpoint_from_topic(self, topic: str) -> str | None:
         """Derive camera info endpoint from a topic.
 
         Args:
@@ -111,7 +117,7 @@ class BaseCameraSensor(ABC):
 
         # Check if the last part is a stream identifier
         last_part = parts[-1].lower()
-        stream_identifiers = ['left_rgb', 'right_rgb', 'depth', 'rgb', 'left', 'right']
+        stream_identifiers = ["left_rgb", "right_rgb", "depth", "rgb", "left", "right"]
 
         if last_part in stream_identifiers:
             # Remove the stream identifier and add 'info'
@@ -133,7 +139,7 @@ class BaseCameraSensor(ABC):
         return self._name
 
     @property
-    def camera_info(self) -> Optional[Dict[str, Any]]:
+    def camera_info(self) -> dict[str, Any] | None:
         """Get the camera metadata information.
 
         Returns:

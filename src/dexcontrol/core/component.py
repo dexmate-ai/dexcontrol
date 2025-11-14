@@ -16,11 +16,9 @@ and RobotJointComponent for components that also support control commands.
 """
 
 import time
-from typing import Any, Final, Mapping, Optional, TypeVar
+from typing import Any, Final, Mapping, TypeVar
 
 import numpy as np
-
-# Use DexComm for all communication
 from dexcomm import Publisher, Subscriber
 from dexcomm.serialization import deserialize_protobuf, serialize_protobuf
 from google.protobuf.message import Message
@@ -59,7 +57,7 @@ class RobotComponent:
             state_message_type: Protobuf message class for component state.
         """
         self._state_message_type = state_message_type
-        self._latest_state: Optional[M] = None
+        self._latest_state: M | None = None
         self._is_active = False
         self._init_subscriber(state_sub_topic, state_message_type)
 

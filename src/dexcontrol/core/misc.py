@@ -21,6 +21,7 @@ import time
 from typing import Any, TypeVar, cast
 
 from dexcomm import Subscriber, call_service
+from dexcomm.serialization.protobuf import control_msg_pb2, control_query_pb2
 from google.protobuf.message import Message
 from loguru import logger
 from rich.console import Console
@@ -28,7 +29,6 @@ from rich.table import Table
 
 from dexcontrol.config.core import BatteryConfig, EStopConfig, HeartbeatConfig
 from dexcontrol.core.component import RobotComponent
-from dexcontrol.proto import dexcontrol_msg_pb2, dexcontrol_query_pb2
 from dexcontrol.utils.comm_helper import get_zenoh_config_path
 from dexcontrol.utils.os_utils import resolve_key_name
 
@@ -55,7 +55,7 @@ class Battery(RobotComponent):
         Args:
             configs: Battery configuration containing subscription topics.
         """
-        super().__init__(configs.state_sub_topic, dexcontrol_msg_pb2.BMSState)
+        super().__init__(configs.state_sub_topic, control_msg_pb2.BMSState)
         self._console = Console()
         self._shutdown_event = threading.Event()
         self._monitor_thread = threading.Thread(
@@ -222,7 +222,7 @@ class EStop(RobotComponent):
             configs: EStop configuration containing subscription topics.
         """
         self._enabled = configs.enabled
-        super().__init__(configs.state_sub_topic, dexcontrol_msg_pb2.EStopState)
+        super().__init__(configs.state_sub_topic, control_msg_pb2.EStopState)
         self._estop_query_name = configs.estop_query_name
         if not self._enabled:
             logger.warning("EStop monitoring is DISABLED via configuration")
@@ -258,7 +258,7 @@ class EStop(RobotComponent):
         Args:
             enable: If True, activates the software E-Stop. If False, deactivates it.
         """
-        query_msg = dexcontrol_query_pb2.SetEstop(enable=enable)
+        query_msg = control_query_pb2.SetEstop(enable=enable)
         call_service(
             resolve_key_name(self._estop_query_name),
             request=query_msg,
@@ -278,7 +278,7 @@ class EStop(RobotComponent):
                 - software_estop_enabled: Software EStop enabled
         """
         state = self._get_state()
-        state = cast(dexcontrol_msg_pb2.EStopState, state)
+        state = cast(control_msg_pb2.EStopState, state)
         if state is None:
             return {
                 "button_pressed": False,
@@ -298,7 +298,7 @@ class EStop(RobotComponent):
     def is_button_pressed(self) -> bool:
         """Checks if the EStop button is pressed."""
         state = self._get_state()
-        state = cast(dexcontrol_msg_pb2.EStopState, state)
+        state = cast(control_msg_pb2.EStopState, state)
         button_pressed = (
             state.left_button_pressed
             or state.right_button_pressed
@@ -310,7 +310,7 @@ class EStop(RobotComponent):
     def is_software_estop_enabled(self) -> bool:
         """Checks if the software EStop is enabled."""
         state = self._get_state()
-        state = cast(dexcontrol_msg_pb2.EStopState, state)
+        state = cast(control_msg_pb2.EStopState, state)
         return state.software_estop_enabled
 
     def activate(self) -> None:
@@ -562,7 +562,7 @@ class Heartbeat:
         with self._paused_lock:
             return self._paused
 
-    def get_status(self) -> dict[str, bool | float | float | None]:
+    def get_status(self) -> dict[str, bool | float | None]:
         """Gets the current heartbeat status information.
 
         Returns:
@@ -697,8 +697,9 @@ class Heartbeat:
 
         # Time since last heartbeat
         if status["time_since_last"] is not None:
-            time_since = status["time_since_last"]
+            time_since = float(status["time_since_last"])
             timeout = status["timeout_seconds"]
+            timeout = float(timeout) if timeout is not None else 1.0
             time_style = (
                 "red"
                 if time_since > timeout

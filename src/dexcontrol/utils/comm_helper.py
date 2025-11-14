@@ -17,7 +17,6 @@ needs using the DexComm library's Raw API.
 import json
 import time
 from pathlib import Path
-from typing import Optional
 
 from dexcomm import ZenohConfig, call_service
 from dexcomm.serialization import deserialize_json
@@ -46,7 +45,7 @@ def get_robot_config() -> ZenohConfig:
         return ZenohConfig.default_peer()
 
 
-def get_zenoh_config_path() -> Optional[Path]:
+def get_zenoh_config_path() -> Path | None:
     """Get robot config only if not using default SessionManager.
 
     DexComm's SessionManager will automatically use the config from

@@ -11,7 +11,7 @@
 """ZED camera sensor implementation using RTC or DexComm subscribers for RGB and depth."""
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -45,13 +45,15 @@ class ZedCameraSensor(BaseCameraSensor):
         """
         super().__init__(configs.name)
         self._configs = configs
-        self._subscribers: Dict[str, Optional[Any]] = {}  # Will hold either RTCSubscriberWrapper or Subscriber
+        self._subscribers: dict[
+            str, Any | None
+        ] = {}  # Will hold either RTCSubscriberWrapper or Subscriber
 
         self._create_subscribers()
 
     def _create_subscriber(
-        self, stream_name: str, stream_config: Dict[str, Any]
-    ) -> Optional[Any]:
+        self, stream_name: str, stream_config: dict[str, Any]
+    ) -> Any | None:
         """Factory method to create a subscriber based on stream type and config."""
         try:
             if not stream_config.get("enable", False):
@@ -75,7 +77,9 @@ class ZedCameraSensor(BaseCameraSensor):
                 # Check if we have RTC info from camera_info
                 rtc_url = self._get_rtc_signaling_url(stream_name)
                 if rtc_url:
-                    logger.info(f"'{self._name}': Creating RTC subscriber for '{stream_name}' with direct URL.")
+                    logger.info(
+                        f"'{self._name}': Creating RTC subscriber for '{stream_name}' with direct URL."
+                    )
                     return create_rtc_camera_subscriber(
                         signaling_url=rtc_url,
                     )
@@ -83,25 +87,35 @@ class ZedCameraSensor(BaseCameraSensor):
                     # Fallback to querying via info_key
                     info_key = stream_config.get("info_key")
                     if not info_key:
-                        logger.warning(f"'{self._name}': No RTC URL or info_key for stream '{stream_name}'.")
+                        logger.warning(
+                            f"'{self._name}': No RTC URL or info_key for stream '{stream_name}'."
+                        )
                         return None
-                    logger.info(f"'{self._name}': Creating RTC subscriber for '{stream_name}' with info_key.")
+                    logger.info(
+                        f"'{self._name}': Creating RTC subscriber for '{stream_name}' with info_key."
+                    )
                     return create_rtc_camera_subscriber(
                         info_topic=info_key,
                     )
             else:
                 topic = stream_config.get("topic")
                 if not topic:
-                    logger.warning(f"'{self._name}': No 'topic' for Zenoh stream '{stream_name}'.")
+                    logger.warning(
+                        f"'{self._name}': No 'topic' for Zenoh stream '{stream_name}'."
+                    )
                     return None
-                logger.info(f"'{self._name}': Creating RGB subscriber for '{stream_name}'.")
+                logger.info(
+                    f"'{self._name}': Creating RGB subscriber for '{stream_name}'."
+                )
                 # Use new DexComm integration
                 return create_camera_subscriber(
                     topic=topic,
                 )
 
         except Exception as e:
-            logger.error(f"Error creating subscriber for '{self._name}/{stream_name}': {e}")
+            logger.error(
+                f"Error creating subscriber for '{self._name}/{stream_name}': {e}"
+            )
             return None
 
     def _create_subscribers(self) -> None:
@@ -123,7 +137,7 @@ class ZedCameraSensor(BaseCameraSensor):
         for name, config in stream_definitions.items():
             self._subscribers[name] = self._create_subscriber(name, config)
 
-    def _determine_info_endpoint(self, subscriber_config: dict) -> Optional[str]:
+    def _determine_info_endpoint(self, subscriber_config: dict) -> str | None:
         """Determine the info endpoint for querying camera metadata.
 
         Args:
@@ -153,7 +167,9 @@ class ZedCameraSensor(BaseCameraSensor):
             if subscriber:
                 try:
                     subscriber.shutdown()
-                    logger.debug(f"'{self._name}': Subscriber '{stream_name}' shut down.")
+                    logger.debug(
+                        f"'{self._name}': Subscriber '{stream_name}' shut down."
+                    )
                 except Exception as e:
                     logger.error(
                         f"Error shutting down '{stream_name}' subscriber for '{self._name}': {e}"
@@ -167,7 +183,9 @@ class ZedCameraSensor(BaseCameraSensor):
             True if at least one subscriber is active, False otherwise.
         """
         return any(
-            sub.get_latest() is not None for sub in self._subscribers.values() if sub is not None
+            sub.get_latest() is not None
+            for sub in self._subscribers.values()
+            if sub is not None
         )
 
     def is_stream_active(self, stream_name: str) -> bool:
@@ -201,7 +219,9 @@ class ZedCameraSensor(BaseCameraSensor):
         if require_all:
             for sub in enabled_subscribers:
                 if not sub.wait_for_message(timeout):
-                    logger.warning(f"'{self._name}': Timed out waiting for subscriber '{sub.name}'.")
+                    logger.warning(
+                        f"'{self._name}': Timed out waiting for subscriber '{sub.name}'."
+                    )
                     return False
             logger.info(f"'{self._name}': All enabled streams are active.")
             return True
@@ -212,13 +232,14 @@ class ZedCameraSensor(BaseCameraSensor):
                     logger.info(f"'{self._name}': At least one stream is active.")
                     return True
                 time.sleep(0.1)
-            logger.warning(f"'{self._name}': Timed out waiting for any stream to become active.")
+            logger.warning(
+                f"'{self._name}': Timed out waiting for any stream to become active."
+            )
             return False
 
     def get_obs(
-        self, obs_keys: Optional[list[str]] = None,
-        include_timestamp: bool = False
-    ) -> Dict[str, Optional[np.ndarray]]:
+        self, obs_keys: list[str] | None = None, include_timestamp: bool = False
+    ) -> dict[str, np.ndarray | None]:
         """Get the latest observation data from specified camera streams.
 
         Args:
@@ -241,26 +262,28 @@ class ZedCameraSensor(BaseCameraSensor):
             data = subscriber.get_latest() if subscriber else None
 
             # DexComm returns dict with 'data' and 'timestamp' keys when timestamp is present
-            has_timestamp = isinstance(data, dict) and 'timestamp' in data
+            has_timestamp = isinstance(data, dict) and "timestamp" in data
 
             if include_timestamp:
                 # Always return a consistent structure
                 if has_timestamp:
                     obs_out[key] = {
-                        'data': data.get('data') if isinstance(data, dict) else None,
-                        'timestamp': data.get('timestamp') if isinstance(data, dict) else None,
+                        "data": data.get("data") if isinstance(data, dict) else None,
+                        "timestamp": data.get("timestamp")
+                        if isinstance(data, dict)
+                        else None,
                     }
                 else:
-                    obs_out[key] = {'data': data, 'timestamp': None}
+                    obs_out[key] = {"data": data, "timestamp": None}
             else:
                 if has_timestamp:
                     # Extract payload when timestamp wrapper is present
-                    obs_out[key] = data.get('data') if isinstance(data, dict) else None
+                    obs_out[key] = data.get("data") if isinstance(data, dict) else None
                 else:
                     obs_out[key] = data
         return obs_out
 
-    def get_left_rgb(self) -> Optional[np.ndarray]:
+    def get_left_rgb(self) -> np.ndarray | None:
         """Get the latest image from the left RGB stream.
 
         Returns:
@@ -269,7 +292,7 @@ class ZedCameraSensor(BaseCameraSensor):
         subscriber = self._subscribers.get("left_rgb")
         return subscriber.get_latest() if subscriber else None
 
-    def get_right_rgb(self) -> Optional[np.ndarray]:
+    def get_right_rgb(self) -> np.ndarray | None:
         """Get the latest image from the right RGB stream.
 
         Returns:
@@ -278,7 +301,7 @@ class ZedCameraSensor(BaseCameraSensor):
         subscriber = self._subscribers.get("right_rgb")
         return subscriber.get_latest() if subscriber else None
 
-    def get_depth(self) -> Optional[np.ndarray]:
+    def get_depth(self) -> np.ndarray | None:
         """Get the latest image from the depth stream.
 
         The depth data is returned as a numpy array with values in meters.
@@ -288,7 +311,6 @@ class ZedCameraSensor(BaseCameraSensor):
         """
         subscriber = self._subscribers.get("depth")
         return subscriber.get_latest() if subscriber else None
-
 
     @property
     def available_streams(self) -> list:
@@ -306,7 +328,11 @@ class ZedCameraSensor(BaseCameraSensor):
         Returns:
             List of stream names that are currently receiving data.
         """
-        return [name for name, sub in self._subscribers.items() if sub and sub.get_latest() is not None]
+        return [
+            name
+            for name, sub in self._subscribers.items()
+            if sub and sub.get_latest() is not None
+        ]
 
     @property
     def height(self) -> dict[str, int]:
@@ -316,7 +342,10 @@ class ZedCameraSensor(BaseCameraSensor):
             Height of the camera image.
         """
         images = self.get_obs()
-        return {name: image.shape[0] if image is not None else 0 for name, image in images.items()}
+        return {
+            name: image.shape[0] if image is not None else 0
+            for name, image in images.items()
+        }
 
     @property
     def width(self) -> dict[str, int]:
@@ -326,8 +355,10 @@ class ZedCameraSensor(BaseCameraSensor):
             Width of the camera image.
         """
         images = self.get_obs()
-        return {name: image.shape[1] if image is not None else 0 for name, image in images.items()}
-
+        return {
+            name: image.shape[1] if image is not None else 0
+            for name, image in images.items()
+        }
 
     @property
     def resolution(self) -> dict[str, tuple[int, int]]:
@@ -337,4 +368,7 @@ class ZedCameraSensor(BaseCameraSensor):
             Resolution of the camera image.
         """
         images = self.get_obs()
-        return {name: (image.shape[0], image.shape[1]) if image is not None else (0, 0) for name, image in images.items()}
+        return {
+            name: (image.shape[0], image.shape[1]) if image is not None else (0, 0)
+            for name, image in images.items()
+        }

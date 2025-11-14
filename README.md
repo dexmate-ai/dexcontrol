@@ -27,6 +27,8 @@ dextop firmware info
 
 If your firmware is outdated, please update it before installing the new version to ensure full compatibility. Please contact the Dexmate team if you do not know how to do it.
 
+**📋 See [CHANGELOG.md](./CHANGELOG.md) for detailed release notes and version history.**
+
 ## 📄 Licensing
 
 This project is **dual-licensed**:

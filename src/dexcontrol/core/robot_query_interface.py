@@ -22,11 +22,11 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 # Use DexComm for all communication
 from dexcomm import call_service
+from dexcomm.serialization.protobuf import control_query_pb2
 from loguru import logger
 
 from dexcontrol.config.vega import VegaConfig, get_vega_config
 from dexcontrol.core.hand import HandType
-from dexcontrol.proto import dexcontrol_query_pb2
 from dexcontrol.utils.comm_helper import get_zenoh_config_path
 from dexcontrol.utils.os_utils import resolve_key_name
 from dexcontrol.utils.pb_utils import (
@@ -111,45 +111,51 @@ class RobotQueryInterface:
             UNKNOWN means not connected or unknown end effector connected.
 
         Raises:
-            RuntimeError: If hand type information cannot be retrieved.
+            RuntimeError: If hand type information cannot be retrieved after 3 attempts.
         """
-        try:
-            # Query hand type using DexComm service
-            full_topic = resolve_key_name(self._configs.hand_info_query_name)
+        full_topic = resolve_key_name(self._configs.hand_info_query_name)
+        max_attempts = 3
+        last_error = None
 
-            response = call_service(
-                full_topic,
-                timeout=5.0,
-                config=get_zenoh_config_path(),
-                request_serializer=None,
-                response_deserializer=None,
-            )
+        for _ in range(max_attempts):
+            try:
+                # Query hand type using DexComm service
+                response = call_service(
+                    full_topic,
+                    timeout=10.0,
+                    config=get_zenoh_config_path(),
+                    request_serializer=None,
+                    response_deserializer=None,
+                )
 
-            if response:
-                # Parse JSON response directly
-                if isinstance(response, bytes):
+                if response:
                     payload_str = response.decode("utf-8")
+                    hand_info = json.loads(payload_str)
+
+                    # Validate the expected format
+                    if (
+                        isinstance(hand_info, dict)
+                        and "left" in hand_info
+                        and "right" in hand_info
+                    ):
+                        logger.info(f"End effector hand types: {hand_info}")
+                        return {
+                            "left": HandType(hand_info["left"]),
+                            "right": HandType(hand_info["right"]),
+                        }
+                    else:
+                        last_error = f"Invalid response format: {hand_info}"
                 else:
-                    payload_str = response
+                    last_error = "No response received from server"
 
-                hand_info = json.loads(payload_str)
+            except Exception as e:
+                last_error = str(e)
 
-                # Validate the expected format
-                if isinstance(hand_info, dict):
-                    logger.info(f"End effector hand types: {hand_info}")
-                    return {
-                        "left": HandType(hand_info["left"]),
-                        "right": HandType(hand_info["right"]),
-                    }
-                else:
-                    logger.warning(f"Invalid hand type format received: {hand_info}")
-
-            # If no valid response received, assume v1 for backward compatibility
-            return {"left": HandType.UNKNOWN, "right": HandType.UNKNOWN}
-
-        except Exception as e:
-            logger.warning(f"Failed to query hand type: {e}. V1 hand type unknown.")
-            return {"left": HandType.UNKNOWN, "right": HandType.UNKNOWN}
+        # All attempts failed, raise error
+        error_msg = f"Failed to query hand type after {max_attempts} attempts"
+        if last_error:
+            error_msg += f": {last_error}"
+        raise RuntimeError(error_msg)
 
     def query_ntp(
         self,
@@ -182,7 +188,7 @@ class RobotQueryInterface:
 
         reply_count = 0
         for i in range(sample_count):
-            request = dexcontrol_query_pb2.NTPRequest()
+            request = control_query_pb2.NTPRequest()
             request.client_send_time_ns = time.time_ns()
             request.sample_count = sample_count
             request.sample_index = i
@@ -201,7 +207,7 @@ class RobotQueryInterface:
                 if response_data:
                     reply_count += 1
                     client_receive_time_ns = time.time_ns()
-                    response = dexcontrol_query_pb2.NTPResponse()
+                    response = control_query_pb2.NTPResponse()
                     response.ParseFromString(response_data)
                     t0 = request.client_send_time_ns
                     t1 = response.server_receive_time_ns
@@ -334,8 +340,8 @@ class RobotQueryInterface:
             if response:
                 # Parse protobuf response directly
                 status_msg = cast(
-                    dexcontrol_query_pb2.ComponentStates,
-                    dexcontrol_query_pb2.ComponentStates.FromString(response),
+                    control_query_pb2.ComponentStates,
+                    control_query_pb2.ComponentStates.FromString(response),
                 )
                 status_dict = status_to_dict(status_msg)
 
@@ -359,23 +365,21 @@ class RobotQueryInterface:
             RuntimeError: If the reboot operation fails.
         """
         component_map = {
-            "arm": dexcontrol_query_pb2.RebootComponent.Component.ARM,
-            "chassis": dexcontrol_query_pb2.RebootComponent.Component.CHASSIS,
-            "torso": dexcontrol_query_pb2.RebootComponent.Component.TORSO,
+            "arm": control_query_pb2.RebootComponent.Component.ARM,
+            "chassis": control_query_pb2.RebootComponent.Component.CHASSIS,
+            "torso": control_query_pb2.RebootComponent.Component.TORSO,
         }
 
         if part not in component_map:
             raise ValueError(f"Invalid component: {part}")
 
         try:
-            query_msg = dexcontrol_query_pb2.RebootComponent(
-                component=component_map[part]
-            )
+            query_msg = control_query_pb2.RebootComponent(component=component_map[part])
 
             call_service(
                 resolve_key_name(self._configs.reboot_query_name),
                 request=query_msg,
-                timeout=2.0,
+                timeout=30.0,
                 config=get_zenoh_config_path(),
                 request_serializer=lambda x: x.SerializeToString(),
                 response_deserializer=None,
@@ -398,17 +402,17 @@ class RobotQueryInterface:
             RuntimeError: If the error clearing operation fails.
         """
         component_map = {
-            "left_arm": dexcontrol_query_pb2.ClearError.Component.LEFT_ARM,
-            "right_arm": dexcontrol_query_pb2.ClearError.Component.RIGHT_ARM,
-            "chassis": dexcontrol_query_pb2.ClearError.Component.CHASSIS,
-            "head": dexcontrol_query_pb2.ClearError.Component.HEAD,
+            "left_arm": control_query_pb2.ClearError.Component.LEFT_ARM,
+            "right_arm": control_query_pb2.ClearError.Component.RIGHT_ARM,
+            "chassis": control_query_pb2.ClearError.Component.CHASSIS,
+            "head": control_query_pb2.ClearError.Component.HEAD,
         }
 
         if part not in component_map:
             raise ValueError(f"Invalid component: {part}")
 
         try:
-            query_msg = dexcontrol_query_pb2.ClearError(component=component_map[part])
+            query_msg = control_query_pb2.ClearError(component=component_map[part])
 
             call_service(
                 resolve_key_name(self._configs.clear_error_query_name),

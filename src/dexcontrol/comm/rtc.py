@@ -18,7 +18,8 @@ import asyncio
 import json
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -57,11 +58,11 @@ class RTCSubscriber:
 
     def __init__(
         self,
-        signaling_url: Optional[str] = None,
-        info_topic: Optional[str] = None,
-        callback: Optional[Callable[[np.ndarray], None]] = None,
+        signaling_url: str | None = None,
+        info_topic: str | None = None,
+        callback: Callable[[np.ndarray], None] | None = None,
         buffer_size: int = 1,
-        name: Optional[str] = None,
+        name: str | None = None,
     ):
         """Initialize WebRTC subscriber.
 
@@ -79,28 +80,28 @@ class RTCSubscriber:
         self.name = name or f"rtc_{(info_topic or 'direct').replace('/', '_')}"
 
         # Data storage
-        self._buffer: List[np.ndarray] = []
+        self._buffer: list[np.ndarray] = []
         self._buffer_lock = threading.Lock()
-        self._latest_frame: Optional[np.ndarray] = None
+        self._latest_frame: np.ndarray | None = None
         self._data_lock = threading.Lock()
 
         # Statistics
         self._frame_count = 0
-        self._last_receive_time_ns: Optional[int] = None
+        self._last_receive_time_ns: int | None = None
 
         # Connection state
         self._active = False
         self._connected = False
-        self._rtc_info: Optional[Dict] = None
+        self._rtc_info: dict | None = None
 
         # Threading
         self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
         # WebRTC objects
-        self._pc: Optional[Any] = None
-        self._websocket: Optional[Any] = None
-        self._async_stop: Optional[Any] = None
+        self._pc: Any | None = None
+        self._websocket: Any | None = None
+        self._async_stop: Any | None = None
 
         # Initialize connection
         self._initialize()
@@ -127,7 +128,7 @@ class RTCSubscriber:
         # Start WebRTC connection
         self._start_connection()
 
-    def _query_connection_info(self) -> Optional[Dict[str, Any]]:
+    def _query_connection_info(self) -> dict[str, Any] | None:
         """Query for WebRTC connection information."""
         full_topic = resolve_key_name(self.topic)
         logger.debug(f"{self.name}: Querying {full_topic}")
@@ -312,17 +313,17 @@ class RTCSubscriber:
 
     # DexComm-compatible API
 
-    def get_latest(self) -> Optional[np.ndarray]:
+    def get_latest(self) -> np.ndarray | None:
         """Get the latest received frame."""
         with self._data_lock:
             return self._latest_frame.copy() if self._latest_frame is not None else None
 
-    def get_buffer(self) -> List[np.ndarray]:
+    def get_buffer(self) -> list[np.ndarray]:
         """Get all buffered frames."""
         with self._buffer_lock:
             return [f.copy() for f in self._buffer]
 
-    def wait_for_message(self, timeout: float = 5.0) -> Optional[np.ndarray]:
+    def wait_for_message(self, timeout: float = 5.0) -> np.ndarray | None:
         """Wait for a frame to be received."""
         start = time.time()
         initial_count = self._frame_count
@@ -334,7 +335,7 @@ class RTCSubscriber:
 
         return None
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get subscriber statistics."""
         with self._data_lock:
             return {
@@ -373,9 +374,9 @@ class RTCSubscriber:
 
 
 def create_rtc_camera_subscriber(
-    signaling_url: Optional[str] = None,
-    info_topic: Optional[str] = None,
-    callback: Optional[Callable[[np.ndarray], None]] = None,
+    signaling_url: str | None = None,
+    info_topic: str | None = None,
+    callback: Callable[[np.ndarray], None] | None = None,
     buffer_size: int = 1,
 ) -> RTCSubscriber:
     """Create an RTC subscriber for camera streams.

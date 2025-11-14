@@ -10,12 +10,12 @@
 
 """RGB camera sensor implementation using RTC or DexComm subscriber."""
 
-from typing import Optional
-
 import numpy as np
+from dexcomm import Subscriber
 from loguru import logger
 
 from dexcontrol.comm import create_camera_subscriber, create_rtc_camera_subscriber
+from dexcontrol.comm.rtc import RTCSubscriber
 from dexcontrol.config.sensors.cameras import RGBCameraConfig
 from dexcontrol.sensors.camera.base_camera import BaseCameraSensor
 
@@ -42,7 +42,7 @@ class RGBCameraSensor(BaseCameraSensor):
         """
         super().__init__(configs.name)
         self._configs = configs
-        self._subscriber = None  # Will be either RTCSubscriberWrapper or DexComm Subscriber
+        self._subscriber: RTCSubscriber | Subscriber | None = None
 
         subscriber_config = configs.subscriber_config.get("rgb", {})
         if not subscriber_config or not subscriber_config.get("enable", False):
@@ -89,7 +89,7 @@ class RGBCameraSensor(BaseCameraSensor):
         if self._subscriber is None:
             logger.warning(f"Failed to create subscriber for '{self._name}'.")
 
-    def _determine_info_endpoint(self, subscriber_config: dict) -> Optional[str]:
+    def _determine_info_endpoint(self, subscriber_config: dict) -> str | None:
         """Determine the info endpoint for querying camera metadata.
 
         Args:

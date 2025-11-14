@@ -12,6 +12,7 @@
 
 import os
 import re
+from importlib.metadata import version
 from typing import Any, Final
 
 from loguru import logger
@@ -61,9 +62,7 @@ def get_robot_model() -> str:
     return model
 
 
-def check_version_compatibility(
-    version_info: dict[str, Any], show_warnings: bool = True
-) -> None:
+def check_version_compatibility(version_info: dict[str, Any]) -> None:
     """Check version compatibility between client and server.
 
     This function uses the new JSON-based version interface to:
@@ -93,8 +92,8 @@ def validate_client_version(version_info: dict[str, Any]) -> None:
         logger.debug("No minimum version requirement from server")
         return
 
-    # Get current library version
-    current_version = getattr(dexcontrol, "__version__", "unknown")
+    # Get current library version using importlib.metadata
+    current_version = version("dexcontrol")
 
     if current_version == "unknown":
         logger.warning("Could not determine current library version")

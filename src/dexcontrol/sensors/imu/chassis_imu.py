@@ -14,8 +14,6 @@ This module provides IMU sensor class for chassis IMU data
 using DexComm's Raw API.
 """
 
-from typing import Dict, List, Optional
-
 import numpy as np
 
 from dexcontrol.comm import create_imu_subscriber
@@ -43,7 +41,6 @@ class ChassisIMUSensor:
             topic=configs.topic,
         )
 
-
     def shutdown(self) -> None:
         """Shutdown the chassis IMU sensor."""
         self._subscriber.shutdown()
@@ -69,7 +66,9 @@ class ChassisIMUSensor:
         msg = self._subscriber.wait_for_message(timeout)
         return msg is not None
 
-    def get_obs(self, obs_keys: Optional[List[str]] = None) -> Optional[Dict[str, np.ndarray]]:
+    def get_obs(
+        self, obs_keys: list[str] | None = None
+    ) -> dict[str, np.ndarray] | None:
         """Get observation data for the chassis IMU sensor.
 
         Args:
@@ -86,7 +85,7 @@ class ChassisIMUSensor:
             - 'timestamp_ns': Timestamp in nanoseconds
         """
         if obs_keys is None:
-            obs_keys = ['ang_vel', 'acc', 'quat']
+            obs_keys = ["ang_vel", "acc", "quat"]
 
         data = self._subscriber.get_latest()
         if data is None:
@@ -95,42 +94,42 @@ class ChassisIMUSensor:
         obs_out = {}
 
         # Add timestamp if available
-        if 'timestamp' in data:
-            obs_out['timestamp_ns'] = data['timestamp']
+        if "timestamp" in data:
+            obs_out["timestamp_ns"] = data["timestamp"]
 
         for key in obs_keys:
-            if key == 'ang_vel':
-                obs_out[key] = data.get('gyro', np.zeros(3))
-            elif key == 'acc':
-                obs_out[key] = data.get('acc', np.zeros(3))
-            elif key == 'quat':
-                obs_out[key] = data.get('quat', np.array([1.0, 0.0, 0.0, 0.0]))
-            elif key == 'mag' and 'mag' in data:
-                obs_out[key] = data['mag']
-            elif key == 'timestamp' and 'timestamp' in data:
-                obs_out['timestamp_ns'] = data['timestamp']
+            if key == "ang_vel":
+                obs_out[key] = data.get("gyro", np.zeros(3))
+            elif key == "acc":
+                obs_out[key] = data.get("acc", np.zeros(3))
+            elif key == "quat":
+                obs_out[key] = data.get("quat", np.array([1.0, 0.0, 0.0, 0.0]))
+            elif key == "mag" and "mag" in data:
+                obs_out[key] = data["mag"]
+            elif key == "timestamp" and "timestamp" in data:
+                obs_out["timestamp_ns"] = data["timestamp"]
 
         return obs_out
 
-    def get_acc(self) -> Optional[np.ndarray]:
+    def get_acc(self) -> np.ndarray | None:
         """Get the latest linear acceleration from chassis IMU.
 
         Returns:
             Linear acceleration [x, y, z] in m/s² if available, None otherwise.
         """
         data = self._subscriber.get_latest()
-        return data.get('acc') if data else None
+        return data.get("acc") if data else None
 
-    def get_gyro(self) -> Optional[np.ndarray]:
+    def get_gyro(self) -> np.ndarray | None:
         """Get the latest angular velocity from chassis IMU.
 
         Returns:
             Angular velocity [x, y, z] in rad/s if available, None otherwise.
         """
         data = self._subscriber.get_latest()
-        return data.get('gyro') if data else None
+        return data.get("gyro") if data else None
 
-    def get_quat(self) -> Optional[np.ndarray]:
+    def get_quat(self) -> np.ndarray | None:
         """Get the latest orientation quaternion from chassis IMU.
 
         Returns:
@@ -138,9 +137,9 @@ class ChassisIMUSensor:
             Note: dexcomm uses [w, x, y, z] quaternion format.
         """
         data = self._subscriber.get_latest()
-        return data.get('quat') if data else None
+        return data.get("quat") if data else None
 
-    def get_mag(self) -> Optional[np.ndarray]:
+    def get_mag(self) -> np.ndarray | None:
         """Get the latest magnetometer reading from chassis IMU.
 
         Returns:
@@ -149,7 +148,7 @@ class ChassisIMUSensor:
         data = self._subscriber.get_latest()
         if not data or not isinstance(data, dict):
             return None
-        return data.get('mag', None)
+        return data.get("mag", None)
 
     def has_mag(self) -> bool:
         """Check if the chassis IMU has magnetometer data available.
@@ -160,7 +159,7 @@ class ChassisIMUSensor:
         data = self._subscriber.get_latest()
         if not data or not isinstance(data, dict):
             return False
-        return 'mag' in data and data['mag'] is not None
+        return "mag" in data and data["mag"] is not None
 
     # Backward compatibility aliases
     get_acceleration = get_acc
