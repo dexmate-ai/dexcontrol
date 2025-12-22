@@ -52,13 +52,14 @@ def get_robot_model() -> str:
         raise ValueError(
             f"Robot name is not set, please set the environment variable {ROBOT_NAME_ENV_VAR}"
         )
-    if not re.match(r"^dm/[a-zA-Z0-9]{12}-(?:\d+|rc\d+)$", robot_name):
+    if not re.match(r"^dm/[a-zA-Z0-9]{12}-(?:\d+p?|rc\d+)$", robot_name):
         raise ValueError(f"Robot name is not in the correct format: {robot_name}")
-
     robot_model_abb = robot_name.split("/")[-1].split("-")[0][:2]
     if robot_model_abb not in robot_model_abb_mapping:
         raise ValueError(f"Unknown robot model: {robot_model_abb}")
-    model = robot_model_abb_mapping[robot_model_abb] + "-" + robot_name.split("-")[-1]
+    model = (
+        robot_model_abb_mapping[robot_model_abb] + "-" + robot_name.split("-")[-1][0]
+    )
     return model
 
 
