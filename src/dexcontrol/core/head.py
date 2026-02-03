@@ -15,17 +15,22 @@ communication. It handles joint position and velocity control, mode setting, and
 state monitoring.
 """
 
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
-from dexcomm import call_service
-from dexcomm.serialization.protobuf import control_msg_pb2, control_query_pb2
+from dexbot_utils import RobotInfo
+from dexbot_utils.configs.components.vega_1 import Vega1HeadConfig
+from dexcomm.codecs import (
+    DictDataCodec,
+    JointCmdCodec,
+    JointModeCodec,
+    JointModeEnum,
+    JointStateCodec,
+)
 from jaxtyping import Float
+from loguru import logger
 
-from dexcontrol.config.core import HeadConfig
 from dexcontrol.core.component import RobotJointComponent
-from dexcontrol.utils.comm_helper import get_zenoh_config_path
-from dexcontrol.utils.os_utils import resolve_key_name
 
 
 class Head(RobotJointComponent):
@@ -42,29 +47,38 @@ class Head(RobotJointComponent):
 
     def __init__(
         self,
-        configs: HeadConfig,
+        name: str,
+        robot_info: RobotInfo,
     ) -> None:
         """Initialize the head controller.
 
         Args:
-            configs: Configuration parameters for the head including communication topics.
+            robot_info: RobotInfo instance.
         """
+        joint_names = robot_info.get_component_joints(name)
+        joint_pos_limits = robot_info.get_joint_pos_limits(joint_names)
+        joint_vel_limits = robot_info.get_joint_vel_limits(joint_names)
+        config = robot_info.get_component_config(name)
+        config = cast(Vega1HeadConfig, config)
         super().__init__(
-            state_sub_topic=configs.state_sub_topic,
-            control_pub_topic=configs.control_pub_topic,
-            state_message_type=control_msg_pb2.MotorStateWithTorque,
-            joint_name=configs.joint_name,
-            joint_limit=configs.joint_limit
-            if hasattr(configs, "joint_limit")
-            else None,
-            joint_vel_limit=configs.joint_vel_limit
-            if hasattr(configs, "joint_vel_limit")
-            else None,
-            pose_pool=configs.pose_pool,
+            name=name,
+            state_sub_topic=config.state_sub_topic,
+            control_pub_topic=config.control_pub_topic,
+            state_decoder=JointStateCodec.decode,
+            control_encoder=JointCmdCodec.encode,
+            joint_name=joint_names,
+            joint_pos_limit=joint_pos_limits,
+            joint_vel_limit=joint_vel_limits,
+            pose_pool=config.pose_pool,
         )
 
         # Store the query topic for later use with DexComm
-        self._mode_query_topic = resolve_key_name(configs.set_mode_query)
+        self._mode_querier = self._node.create_service_client(
+            service_name=config.set_mode_query,
+            request_encoder=JointModeCodec.encode,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
+        )
         assert self._joint_vel_limit is not None, "joint_vel_limit is not set"
 
     def set_joint_pos(
@@ -149,9 +163,9 @@ class Head(RobotJointComponent):
         joint_pos = self._convert_joint_cmd_to_array(joint_pos)
         joint_vel = self._process_joint_velocities(joint_vel, joint_pos)
 
-        if self._joint_limit is not None:
+        if self._joint_pos_limit is not None:
             joint_pos = np.clip(
-                joint_pos, self._joint_limit[:, 0], self._joint_limit[:, 1]
+                joint_pos, self._joint_pos_limit[:, 0], self._joint_pos_limit[:, 1]
             )
         if self._joint_vel_limit is not None:
             joint_vel = np.clip(
@@ -159,10 +173,8 @@ class Head(RobotJointComponent):
             )
 
         # Create and send control message
-        control_msg = control_msg_pb2.MotorPosVelCommand()
-        control_msg.pos.extend(joint_pos.tolist())
-        control_msg.vel.extend(joint_vel.tolist())
-        self._publish_control(control_msg)
+        data = dict(pos=joint_pos, vel=joint_vel)
+        self._publish_control(control_msg=data)
 
         # Wait if specified
         self._wait_for_position(
@@ -182,8 +194,8 @@ class Head(RobotJointComponent):
             ValueError: If an invalid mode is specified.
         """
         mode_map = {
-            "enable": control_query_pb2.SetHeadMode.Mode.ENABLE,
-            "disable": control_query_pb2.SetHeadMode.Mode.DISABLE,
+            "enable": JointModeEnum.ENABLE,
+            "disable": JointModeEnum.DISABLE,
         }
 
         if mode not in mode_map:
@@ -191,26 +203,24 @@ class Head(RobotJointComponent):
                 f"Invalid mode: {mode}. Must be one of {list(mode_map.keys())}"
             )
 
-        query_msg = control_query_pb2.SetHeadMode()
-        query_msg.mode = mode_map[mode]
+        query_msg = {"mode": [mode_map[mode]] * 3}  # 3 head joints
 
-        call_service(
-            self._mode_query_topic,
-            request=query_msg,
-            timeout=5.0,
-            config=get_zenoh_config_path(),
-            request_serializer=lambda x: x.SerializeToString(),
-            response_deserializer=None,
-        )
+        # Wait for service to be available before calling
+        if not self._mode_querier.wait_for_service(timeout=5.0):
+            logger.warning(
+                f"{self._node.get_name()}: Mode service not available, command may fail"
+            )
 
-    def get_joint_limit(self) -> Float[np.ndarray, "3 2"] | None:
-        """Get the joint limits of the head.
+        self._mode_querier.call(query_msg)
+
+    def get_joint_pos_limit(self) -> Float[np.ndarray, "3 2"] | None:
+        """Get the joint position limits of the head.
 
         Returns:
-            Array of joint limits with shape (3, 2), where the first column contains
+            Array of joint position limits with shape (3, 2), where the first column contains
             lower limits and the second column contains upper limits, or None if not configured.
         """
-        return self._joint_limit
+        return self._joint_pos_limit
 
     def stop(self) -> None:
         """Stop the head by setting target position to current position with zero velocity."""

@@ -15,8 +15,8 @@ using DexComm's Raw API.
 """
 
 import numpy as np
-
-from dexcontrol.comm import create_imu_subscriber
+from dexcomm import Node
+from dexcomm.codecs import IMUDataCodec
 
 
 class ChassisIMUSensor:
@@ -27,6 +27,7 @@ class ChassisIMUSensor:
 
     def __init__(
         self,
+        name,
         configs,
     ) -> None:
         """Initialize the chassis IMU sensor.
@@ -34,11 +35,12 @@ class ChassisIMUSensor:
         Args:
             configs: Configuration for the chassis IMU sensor.
         """
-        self._name = configs.name
-
-        # Create IMU subscriber using DexComm integration
-        self._subscriber = create_imu_subscriber(
+        self._name = name
+        self._node = Node(name=self._name)
+        self._subscriber = self._node.create_subscriber(
             topic=configs.topic,
+            callback=None,
+            decoder=IMUDataCodec.decode,
         )
 
     def shutdown(self) -> None:
@@ -51,8 +53,7 @@ class ChassisIMUSensor:
         Returns:
             True if receiving data, False otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data is not None
+        return self._subscriber.is_active(0.1)
 
     def wait_for_active(self, timeout: float = 5.0) -> bool:
         """Wait for the chassis IMU sensor to start receiving data.
@@ -63,8 +64,7 @@ class ChassisIMUSensor:
         Returns:
             True if sensor becomes active, False if timeout is reached.
         """
-        msg = self._subscriber.wait_for_message(timeout)
-        return msg is not None
+        return self._node.wait_for_active(timeout)
 
     def get_obs(
         self, obs_keys: list[str] | None = None
@@ -73,32 +73,27 @@ class ChassisIMUSensor:
 
         Args:
             obs_keys: List of observation keys to retrieve. If None, returns all available data.
-                     Valid keys: ['ang_vel', 'acc', 'quat', 'mag', 'timestamp']
+                     Valid keys: ['gyro', 'acc', 'quat', 'mag', 'timestamp']
 
         Returns:
             Dictionary with observation data including all IMU measurements.
             Keys are mapped as follows:
-            - 'ang_vel': Angular velocity from 'gyro'
+            - 'gyro': Angular velocity from 'gyro'
             - 'acc': Linear acceleration from 'acc'
             - 'quat': Orientation quaternion from 'quat' [w, x, y, z]
             - 'mag': Magnetometer from 'mag' (if available)
             - 'timestamp_ns': Timestamp in nanoseconds
         """
         if obs_keys is None:
-            obs_keys = ["ang_vel", "acc", "quat"]
+            obs_keys = ["gyro", "acc", "quat"]
 
         data = self._subscriber.get_latest()
-        if data is None:
-            return None
 
         obs_out = {}
-
-        # Add timestamp if available
-        if "timestamp" in data:
-            obs_out["timestamp_ns"] = data["timestamp"]
+        obs_out["timestamp_ns"] = data["timestamp_ns"]
 
         for key in obs_keys:
-            if key == "ang_vel":
+            if key == "gyro":
                 obs_out[key] = data.get("gyro", np.zeros(3))
             elif key == "acc":
                 obs_out[key] = data.get("acc", np.zeros(3))
@@ -106,9 +101,6 @@ class ChassisIMUSensor:
                 obs_out[key] = data.get("quat", np.array([1.0, 0.0, 0.0, 0.0]))
             elif key == "mag" and "mag" in data:
                 obs_out[key] = data["mag"]
-            elif key == "timestamp" and "timestamp" in data:
-                obs_out["timestamp_ns"] = data["timestamp"]
-
         return obs_out
 
     def get_acc(self) -> np.ndarray | None:

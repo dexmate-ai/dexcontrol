@@ -41,7 +41,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tyro
 
-from dexcontrol.config.vega import get_vega_config
+from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
 
 
@@ -154,9 +154,9 @@ def main(fps: float = 30.0, use_rtc: bool = False) -> None:
         fps: Display refresh rate in Hz (default: 30.0)
         use_rtc: Use WebRTC for RGB streams if True (default: False)
     """
-    configs = get_vega_config()
-    configs.sensors.head_camera.enable = True
-    configs.sensors.head_camera.use_rtc = use_rtc
+    configs = get_robot_config()
+    configs.sensors["head_camera"].enabled = True
+    configs.sensors["head_camera"].transport = "rtc" if use_rtc else "zenoh"
 
     with Robot(configs=configs) as robot:
         # Wait for camera to become active
@@ -167,8 +167,8 @@ def main(fps: float = 30.0, use_rtc: bool = False) -> None:
             print("Warning: Some camera streams may not be active")
 
         # Print camera information nicely
-        camera_info = robot.sensors.head_camera.camera_info
-        print_camera_info(camera_info)
+        # camera_info = robot.sensors.head_camera.camera_info
+        # print_camera_info(camera_info)
 
         # Start live camera visualization
         visualize_camera_data(robot, fps)

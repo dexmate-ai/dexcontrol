@@ -18,7 +18,7 @@ performs a clean shutdown.
 import tyro
 from loguru import logger
 
-from dexcontrol.config.vega import get_vega_config
+from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
 
 
@@ -30,8 +30,8 @@ def main() -> None:
 
     The ultrasonic sensor returns distance measurements in meters.
     """
-    configs = get_vega_config()
-    configs.sensors.ultrasonic.enable = True
+    configs = get_robot_config()
+    configs.sensors["ultrasonic"].enabled = True
     with Robot(configs=configs) as bot:
         # Get and log ultrasonic sensor reading
         distance = bot.sensors.ultrasonic.get_obs()

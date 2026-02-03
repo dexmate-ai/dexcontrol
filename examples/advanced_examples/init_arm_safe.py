@@ -19,7 +19,7 @@ from typing import Literal
 
 import numpy as np
 import tyro
-from dexcomm.utils import RateLimiter
+from dexcomm import RateLimiter
 from dexmotion.motion_manager import MotionManager
 from dexmotion.tasks.move_out_of_self_collision_task import MoveOutOfSelfCollisionTask
 from dexmotion.tasks.move_to_configuration_task import MoveToConfigurationTask
@@ -51,15 +51,25 @@ class ArmSafeInitializer:
         # Initialize robot and components
         self.bot = bot if bot is not None else Robot()
         self.rate_limiter = RateLimiter(self.control_hz)
-        self.torso_pitch_angle = self.bot.torso.pitch_angle
 
         # Initialize arms and hands
         self.left_arm, self.right_arm = self._initialize_arms(self.bot)
 
-        # Get initial joint configuration
-        initial_joint_configuration = self.bot.get_joint_pos_dict(
-            ["head", "torso", "left_arm", "right_arm"]
-        )
+        # Get torso pitch angle if torso exists, otherwise use default
+        if hasattr(self.bot, "torso"):
+            self.torso_pitch_angle = self.bot.torso.pitch_angle
+            # Get initial joint configuration including torso
+            components = ["left_arm", "right_arm"]
+            if hasattr(self.bot, "head"):
+                components.append("head")
+            components.append("torso")
+            initial_joint_configuration = self.bot.get_joint_pos_dict(components)
+        else:
+            self.torso_pitch_angle = np.pi / 2  # Default for upper body variants
+            components = ["left_arm", "right_arm"]
+            if hasattr(self.bot, "head"):
+                components.append("head")
+            initial_joint_configuration = self.bot.get_joint_pos_dict(components)
 
         # Setup motion manager
         self.motion_manager = MotionManager(

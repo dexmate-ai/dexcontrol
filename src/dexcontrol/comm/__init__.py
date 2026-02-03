@@ -28,8 +28,6 @@ from dexcontrol.comm.subscribers import (
     create_imu_subscriber,
     create_lidar_subscriber,
     create_subscriber,
-    quick_subscribe,
-    wait_for_any_message,
 )
 
 __all__ = [
@@ -46,6 +44,4 @@ __all__ = [
     "RTCSubscriber",
     "create_rtc_camera_subscriber",
     # Utilities
-    "quick_subscribe",
-    "wait_for_any_message",
 ]

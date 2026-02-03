@@ -32,24 +32,33 @@ def main() -> None:
     """
     # Initialize robot with default configuration
     with Robot() as bot:
-        # Get joint positions from all components
+        # Get joint positions from all available components
         joint_positions = {
             "Left arm": (bot.left_arm.get_joint_pos(), bot.left_arm.get_timestamp_ns()),
             "Right arm": (
                 bot.right_arm.get_joint_pos(),
                 bot.right_arm.get_timestamp_ns(),
             ),
-            "Head": (bot.head.get_joint_pos(), bot.head.get_timestamp_ns()),
-            "Torso": (bot.torso.get_joint_pos(), bot.torso.get_timestamp_ns()),
-            "Chassis_Steer": (
+        }
+        if hasattr(bot, "head"):
+            joint_positions["Head"] = (
+                bot.head.get_joint_pos(),
+                bot.head.get_timestamp_ns(),
+            )
+        if hasattr(bot, "torso"):
+            joint_positions["Torso"] = (
+                bot.torso.get_joint_pos(),
+                bot.torso.get_timestamp_ns(),
+            )
+        if hasattr(bot, "chassis"):
+            joint_positions["Chassis_Steer"] = (
                 bot.chassis.chassis_steer.get_joint_pos(),
                 bot.chassis.chassis_steer.get_timestamp_ns(),
-            ),
-            "Chassis_Drive": (
+            )
+            joint_positions["Chassis_Drive"] = (
                 bot.chassis.chassis_drive.get_joint_pos(),
                 bot.chassis.chassis_drive.get_timestamp_ns(),
-            ),
-        }
+            )
         if bot.have_hand("left"):
             joint_positions["Left hand"] = (
                 bot.left_hand.get_joint_pos(),

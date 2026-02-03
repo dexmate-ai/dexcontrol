@@ -37,11 +37,11 @@ def print_button_state(robot: Robot, arm_side: str) -> None:
         print(f"\n{arm_side.upper()} ARM: No wrench sensor detected")
         return
 
-    blue_button, green_button = arm.wrench_sensor.get_button_state()
+    button_state = arm.wrench_sensor.get_button_state()
 
     print(f"\n{arm_side.upper()} ARM:")
-    print(f"Blue button: {blue_button}")
-    print(f"Green button: {green_button}")
+    print(f"Blue button: {button_state['blue_button']}")
+    print(f"Green button: {button_state['green_button']}")
     print("\n" + "-" * 50)
 
 

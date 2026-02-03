@@ -15,10 +15,8 @@ Raw API for distance measurements.
 """
 
 import numpy as np
-from dexcomm.serialization import deserialize_protobuf
-from dexcomm.serialization.protobuf import control_msg_pb2
-
-from dexcontrol.comm import create_subscriber
+from dexcomm import Node
+from dexcomm.codecs import UltrasonicStateCodec
 
 
 class UltrasonicSensor:
@@ -29,6 +27,7 @@ class UltrasonicSensor:
 
     def __init__(
         self,
+        name,
         configs,
     ) -> None:
         """Initialize the ultrasonic sensor.
@@ -36,14 +35,15 @@ class UltrasonicSensor:
         Args:
             configs: Configuration for the ultrasonic sensor.
         """
-        self._name = configs.name
+        self._name = name
+        self._node = Node(name=self._name)
 
         # Create the protobuf subscriber using our clean DexComm integration
-        self._subscriber = create_subscriber(
+        self._subscriber = self._node.create_subscriber(
             topic=configs.topic,
-            deserializer=lambda data: deserialize_protobuf(data, control_msg_pb2.UltrasonicState),
+            callback=None,
+            decoder=UltrasonicStateCodec.decode,
         )
-
 
     def shutdown(self) -> None:
         """Shutdown the ultrasonic sensor."""
@@ -83,10 +83,10 @@ class UltrasonicSensor:
         data = self._subscriber.get_latest()
         if data is not None:
             obs = [
-                data.front_left,
-                data.front_right,
-                data.back_left,
-                data.back_right,
+                data['front_left'],
+                data['front_right'],
+                data['back_left'],
+                data['back_right'],
             ]
             return np.array(obs, dtype=np.float32)
 

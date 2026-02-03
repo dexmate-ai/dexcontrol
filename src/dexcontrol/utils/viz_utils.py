@@ -10,11 +10,12 @@
 
 """Utility functions for displaying information in a Rich table format."""
 
+from dexcomm.codecs import ConnectionStatusEnum, OperationalStatusEnum
 from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
-from dexcontrol.utils.pb_utils import TYPE_SOFTWARE_VERSION
+from dexcontrol.utils.pb_utils import TYPE_SOFTWARE_VERSION, ComponentStatus
 
 
 def show_software_version(version_info: dict[str, TYPE_SOFTWARE_VERSION]):
@@ -48,9 +49,13 @@ def show_component_status(status_info: dict[str, dict]):
 
     Args:
         status_info: Dictionary containing status info for each component.
+                    Expected structure: {'states': {'component_name': {'connection': int, 'operation': int, 'error': {...}}}}
+                    or old structure: {'component_name': {'connected': bool, 'enabled': bool, 'error_state': int, 'error_code': int}}
     """
-    from dexcontrol.utils.error_code import get_error_description
-    from dexcontrol.utils.pb_utils import ComponentStatus
+    if "states" not in status_info:
+        return
+    # Extract states from the new structure, fallback to old structure
+    states = status_info.get("states", status_info)
 
     table = Table(title="Component Status")
     table.add_column("Component", style="cyan")
@@ -64,64 +69,57 @@ def show_component_status(status_info: dict[str, dict]):
         ComponentStatus.NORMAL: "[green]:white_check_mark:[/green]",
         ComponentStatus.NA: "[dim]N/A[/dim]",
     }
-
     # Sort components by name to ensure consistent order
-    for component in sorted(status_info.keys()):
-        status = status_info[component]
+    for component in sorted(states.keys()):
+        status = states[component]
+
+        connected = status["connection"] == ConnectionStatusEnum.CONNECTED
+        operation = status["operation"]
+        error_info = status.get("error", {})
+        error_message = error_info.get("error_message", "")
+
+        # Determine enabled status based on operation
+        if operation == OperationalStatusEnum.ENABLED:
+            enabled = True
+        elif operation == OperationalStatusEnum.DISABLED:
+            enabled = False
+        elif operation == OperationalStatusEnum.NOT_AVAILABLE:
+            enabled = ComponentStatus.NA
+        elif operation == OperationalStatusEnum.CALIBRATING:
+            enabled = "[yellow]CALIBRATING[/yellow]"
+        elif operation == OperationalStatusEnum.ERROR:
+            enabled = False
+        else:
+            enabled = False
+
+        # Determine if we should show error details
+        has_error = operation == OperationalStatusEnum.ERROR or error_message != ""
+
         # Format connection status
-        connected = status_icons[status["connected"]]
+        connected_icon = status_icons.get(connected, "[red]:x:[/red]")
 
         # Format enabled status
-        enabled = status_icons.get(status["enabled"], "[red]:x:[/red]")
+        if isinstance(enabled, str):
+            enabled_icon = enabled  # Already formatted (e.g., CALIBRATING)
+        else:
+            enabled_icon = status_icons.get(enabled, "[red]:x:[/red]")
 
         # Format error status
-        if status["error_state"] == ComponentStatus.NORMAL:
+        if not has_error:
             error = "[green]:white_check_mark:[/green]"
-        elif status["error_state"] == ComponentStatus.NA:
+        elif (
+            "connection" in status and operation == OperationalStatusEnum.NOT_AVAILABLE
+        ):
+            error = "[dim]N/A[/dim]"
+        elif not connected:
             error = "[dim]N/A[/dim]"
         else:
-            # Convert error code to human-readable text
-            error_code = status["error_code"]
-            if isinstance(error_code, int):
-                error_desc = get_error_description(component, error_code)
-                # Show both raw code and description with formatting
-                if error_code == 0:
-                    error = "[green]:white_check_mark:[/green]"
-                else:
-                    # Check if this is an unknown error
-                    if "Unknown" in error_desc:
-                        # For unknown errors, show the hex code prominently
-                        error = f"[bold red]:warning: 0x{error_code:08X}[/bold red]\n[dim italic]Unknown error code[/dim italic]"
-                    else:
-                        # For known errors, show both code and description
-                        error = f"[bold red]:warning: 0x{error_code:08X}[/bold red]\n[yellow]{error_desc}[/yellow]"
-            else:
-                # Handle hex string format if provided
-                try:
-                    error_code_int = (
-                        int(error_code, 16)
-                        if isinstance(error_code, str)
-                        else error_code
-                    )
-                    error_desc = get_error_description(component, error_code_int)
-                    # Show both raw code and description with formatting
-                    if error_code_int == 0:
-                        error = "[green]:white_check_mark:[/green]"
-                    else:
-                        # Check if this is an unknown error
-                        if "Unknown" in error_desc:
-                            # For unknown errors, show the hex code prominently
-                            error = f"[bold red]:warning: 0x{error_code_int:08X}[/bold red]\n[dim italic]Unknown error code[/dim italic]"
-                        else:
-                            # For known errors, show both code and description
-                            error = f"[bold red]:warning: 0x{error_code_int:08X}[/bold red]\n[yellow]{error_desc}[/yellow]"
-                except (ValueError, TypeError):
-                    error = f"[red]{str(error_code)}[/red]"
+            error = f"[red]{error_message}[/red]"
 
         table.add_row(
             component,
-            connected,
-            enabled,
+            connected_icon,
+            enabled_icon,
             error,
         )
 

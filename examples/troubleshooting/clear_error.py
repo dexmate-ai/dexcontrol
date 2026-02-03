@@ -30,7 +30,7 @@ def main() -> None:
     robot = Robot()
 
     # List of components that support error clearing
-    components = ["left_arm", "right_arm", "head", "chassis"]
+    components = ["left_arm", "right_arm", "head", "chassis", "left_hand", "right_hand"]
 
     logger.info("Starting error clearing process for all components...")
 

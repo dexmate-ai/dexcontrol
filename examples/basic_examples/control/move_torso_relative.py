@@ -51,6 +51,10 @@ def main(
     # Initialize robot and move to safe starting position
     bot = Robot()
 
+    if bot.robot_model == "vega_1u":
+        logger.error("Invalid operation: Vega 1U does not have a torso")
+        return
+
     # Ensure arms are folded
     if not (
         bot.left_arm.is_pose_reached("folded")

@@ -11,7 +11,6 @@
 """Operating system utility functions."""
 
 import os
-import re
 from importlib.metadata import version
 from typing import Any, Final
 
@@ -44,25 +43,6 @@ def resolve_key_name(key: str) -> str:
     return f"{robot_name}/{key}"
 
 
-def get_robot_model() -> str:
-    """Get the robot model from the environment variable."""
-    robot_model_abb_mapping = dict(vg="vega")
-    robot_name = os.getenv(ROBOT_NAME_ENV_VAR)
-    if robot_name is None:
-        raise ValueError(
-            f"Robot name is not set, please set the environment variable {ROBOT_NAME_ENV_VAR}"
-        )
-    if not re.match(r"^dm/[a-zA-Z0-9]{12}-(?:\d+p?|rc\d+)$", robot_name):
-        raise ValueError(f"Robot name is not in the correct format: {robot_name}")
-    robot_model_abb = robot_name.split("/")[-1].split("-")[0][:2]
-    if robot_model_abb not in robot_model_abb_mapping:
-        raise ValueError(f"Unknown robot model: {robot_model_abb}")
-    model = (
-        robot_model_abb_mapping[robot_model_abb] + "-" + robot_name.split("-")[-1][0]
-    )
-    return model
-
-
 def check_version_compatibility(version_info: dict[str, Any]) -> None:
     """Check version compatibility between client and server.
 
@@ -86,8 +66,7 @@ def validate_client_version(version_info: dict[str, Any]) -> None:
         version_info: Dictionary containing server and client version information.
     """
 
-    client_info = version_info.get("client", {})
-    min_required_version = client_info.get("minimal_version")
+    min_required_version = version_info["min_client_version"]
 
     if not min_required_version:
         logger.debug("No minimum version requirement from server")
@@ -130,7 +109,7 @@ def validate_server_version(version_info: dict[str, Any]) -> None:
     Args:
         version_info: Dictionary containing server and client version information.
     """
-    server_info = version_info.get("server", {})
+    server_info = version_info.get("firmware_version", {})
 
     if not server_info:
         logger.debug("No server version information available")
@@ -192,7 +171,7 @@ def compare_versions(version1: str, version2: str) -> int:
             parts = v.split(".")
             numeric_parts = []
             for part in parts:
-                # Remove any non-numeric suffixes (like -alpha, -rc1, etc.)
+                # Remove any non-numeric suffixes (like -alpha, etc.)
                 numeric_part = ""
                 for char in part:
                     if char.isdigit():

@@ -2,13 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-02-02
+
+### Added
+- Unified support for Vega-1U, Vega-1, and Vega-1P robot variants.
+- Dex-gripper end effector support.
+- Robot arm PID tuning (currently P gain only).
+- Arm brake release when joint limits are exceeded.
+- Extracted configuration management to `dexbot-utils` package.
+- Custom end effector feedback topic for receiving data frames from unrecognized end effectors.
+- USB camera support with dedicated `USBCamera` sensor class and configuration.
+- Enhanced camera base class with improved RTC and dexcomm integration.
+- New robot info helper utilities for better system information management.
+
+### Changed
+- **Major dexcomm Migration**: Migrated to dexcomm (>= 0.4.0) with Rust backend for improved performance and reliability.
+- Refactored camera architecture with unified base camera implementation supporting both local and RTC modes.
+- Simplified subscriber infrastructure by removing redundant subscriber wrapper code.
+- Updated all sensor configurations for seamless compatibility with latest dexcomm API.
+- Improved ZED camera implementation with better depth handling and timestamp support.
+- Improve the error code message parsing for all the components. Now dexcontrol will no longer get any error code, it will directly get the error message for each joint.
+
+### Fixed
+- Sensor initialization issues after dexcomm migration.
+- Camera streaming bugs with latest dexcomm integration.
+- ZED head camera configuration and initialization.
+- RTC camera configuration handling.
+- IMU, LiDAR, and ultrasonic sensor compatibility with new dexcomm version.
+- Error handling and reliability across all sensors.
+
+### Dependencies
+- **Breaking**: Requires `dexcomm >= 0.4.0` (migrated from `>= 0.1.18`).
+- **Breaking**: Requires `dexbot-utils >= 0.4.0`.
+- **Breaking**: Requires firmware >= 0.4.0 on the SOC.
+- Removed optional dependencies: `aiortc`, `websockets` (now handled by dexcomm).
+
+### Version Requirements
+- **SOC Minimal Version**: 360
+
 ## [0.3.3] - 2025-10-09
 
 ### Added
 - WebRTC camera streaming via `RTCSubscriber` with DexComm-compatible API; added `create_rtc_camera_subscriber`.
 - ZED and RGB camera sensors now support RTC mode and DexComm factories; depth stream uses DexComm depth deserializer.
 - ZED `get_obs` supports `include_timestamp` to passthrough timestamps when provided by DexComm.
-- Core DexComm subscriber utilities: `create_subscriber`, `create_buffered_subscriber`, `create_camera_subscriber`, `create_depth_subscriber`, `create_imu_subscriber`, `create_lidar_subscriber`, `create_generic_subscriber`, `quick_subscribe`, `wait_for_any_message`.
+- Core DexComm subscriber utilities: `create_subscriber`, `create_buffered_subscriber`, `create_camera_subscriber`, `create_depth_subscriber`, `create_imu_subscriber`, `create_lidar_subscriber`, `create_generic_subscriber`.
 - Ultrasonic sensor now uses typed protobuf deserialization and returns standardized `(4,)` distance array in order `[front_left, front_right, back_left, back_right]`.
 
 ### Changed

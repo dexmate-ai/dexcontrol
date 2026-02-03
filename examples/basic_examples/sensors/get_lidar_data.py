@@ -14,13 +14,27 @@ The script initializes the robot with LIDAR enabled, captures scan data,
 and displays it in a simple Cartesian plot.
 """
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import tyro
+from dexcontrol.config.vega import get_vega_config
 from loguru import logger
 
-from dexcontrol.config.vega import get_vega_config
 from dexcontrol.robot import Robot
+
+try:
+    # Try TkAgg backend first (more reliable for live display)
+    matplotlib.use("TkAgg")
+    print("Using TkAgg backend for display")
+except ImportError:
+    try:
+        # Fallback to Qt5Agg
+        matplotlib.use("Qt5Agg")
+        print("Using Qt5Agg backend for display")
+    except ImportError:
+        # Last resort - use default
+        print("Using default matplotlib backend")
 
 
 def plot_lidar_scan(ranges: np.ndarray, angles: np.ndarray) -> None:

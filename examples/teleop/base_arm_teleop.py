@@ -19,7 +19,7 @@ import threading
 
 import numpy as np
 import pytransform3d.rotations as pr
-from dexcomm.utils import RateLimiter
+from dexcomm import RateLimiter
 from dexmotion.motion_manager import MotionManager
 from dexmotion.utils import robot_utils
 from loguru import logger
@@ -74,9 +74,14 @@ class BaseIKController:
 
         # Get initial joint positions
         try:
-            joint_pos_dict = self.bot.get_joint_pos_dict(
-                component=["left_arm", "right_arm", "torso"]
-            )
+            if self.bot.robot_model == "vega_1u":
+                joint_pos_dict = self.bot.get_joint_pos_dict(
+                    component=["left_arm", "right_arm"]
+                )
+            else:
+                joint_pos_dict = self.bot.get_joint_pos_dict(
+                    component=["left_arm", "right_arm", "torso"]
+                )
             logger.info("Initial joint positions retrieved successfully")
         except Exception as e:
             logger.error(f"Error getting joint positions: {e}")

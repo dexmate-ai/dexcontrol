@@ -15,18 +15,17 @@ based on configuration and provides unified access to them.
 """
 
 import time
-import traceback
 from typing import TYPE_CHECKING, Any
 
-import hydra.utils as hydra_utils
+from dexbot_utils.configs import BaseComponentConfig
 from loguru import logger
-from omegaconf import DictConfig, OmegaConf
-
-from dexcontrol.config.sensors.vega_sensors import VegaSensorsConfig
 
 if TYPE_CHECKING:
-    from dexcontrol.sensors.camera.rgb_camera import RGBCameraSensor
-    from dexcontrol.sensors.camera.zed_camera import ZedCameraSensor
+    from dexcontrol.sensors.camera.usb_camera import USBCameraSensor
+    from dexcontrol.sensors.camera.zed_camera import (
+        ZedCameraSensor,
+        ZedXOneCameraSensor,
+    )
     from dexcontrol.sensors.imu.chassis_imu import ChassisIMUSensor
     from dexcontrol.sensors.imu.zed_imu import ZedIMUSensor
     from dexcontrol.sensors.lidar.rplidar import RPLidarSensor
@@ -47,16 +46,18 @@ class Sensors:
     if TYPE_CHECKING:
         # Type annotations for dynamically created sensor attributes
         head_camera: ZedCameraSensor
-        base_left_camera: RGBCameraSensor
-        base_right_camera: RGBCameraSensor
-        base_front_camera: RGBCameraSensor
-        base_back_camera: RGBCameraSensor
+        left_wrist_camera: ZedXOneCameraSensor
+        right_wrist_camera: ZedXOneCameraSensor
+        base_left_camera: USBCameraSensor
+        base_right_camera: USBCameraSensor
+        base_front_camera: USBCameraSensor
+        base_back_camera: USBCameraSensor
         base_imu: ChassisIMUSensor
         head_imu: ZedIMUSensor
         lidar: RPLidarSensor
         ultrasonic: UltrasonicSensor
 
-    def __init__(self, configs: DictConfig | VegaSensorsConfig) -> None:
+    def __init__(self, configs: dict[str, BaseComponentConfig]) -> None:
         """Initialize sensors from configuration.
 
         Args:
@@ -64,16 +65,13 @@ class Sensors:
         """
         self._sensors: list[Any] = []
 
-        dict_configs = (OmegaConf.structured(configs) if isinstance(configs, VegaSensorsConfig)
-                       else configs)
-
-        for sensor_name, sensor_config in dict_configs.items():
+        for sensor_name, sensor_config in configs.items():
             sensor = self._create_sensor(sensor_config, str(sensor_name))
             if sensor is not None:
                 setattr(self, str(sensor_name), sensor)
                 self._sensors.append(sensor)
 
-    def _create_sensor(self, config: DictConfig | None, name: str) -> Any | None:
+    def _create_sensor(self, config: BaseComponentConfig, name: str) -> Any | None:
         """Creates and initializes a sensor from config.
 
         Args:
@@ -83,35 +81,22 @@ class Sensors:
         Returns:
             Initialized sensor object or None if creation fails.
         """
-        if config is None:
-            logger.debug(f"Sensor {name} config is None")
-            return None
-
-        if not config.enable:
+        from dexcontrol.core.config import get_sensor_mapping
+        if not config.enabled:
             logger.debug(f"Sensor {name} is disabled")
             return None
 
-        if not (hasattr(config, '_target_') and config._target_):
+        sensor_mapping = get_sensor_mapping()
+        if type(config) not in sensor_mapping:
             return None
 
-        try:
-            temp_config = OmegaConf.create({
-                '_target_': config._target_,
-                'configs': {k: v for k, v in config.items() if k != '_target_'}
-            })
+        sensor_class = sensor_mapping[type(config)]
+        sensor = sensor_class(name=name, configs=config)
 
-            # Note: zenoh_session no longer needed as DexComm handles sessions
-            sensor = hydra_utils.instantiate(temp_config)
+        if hasattr(sensor, "start"):
+            sensor.start()
 
-            if hasattr(sensor, "start"):
-                sensor.start()
-
-            return sensor
-
-        except Exception as e:
-            logger.error(f"Failed to instantiate sensor {name}: {e}")
-            logger.debug(f"Full traceback:\n{traceback.format_exc()}")
-            return None
+        return sensor
 
     def shutdown(self) -> None:
         """Shuts down all active sensors."""

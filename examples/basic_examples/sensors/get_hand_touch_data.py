@@ -17,9 +17,9 @@ the robot hands. Only V2 hands have touch sensors available.
 import time
 
 import tyro
+from dexbot_utils import HandType
 from loguru import logger
 
-from dexcontrol.core.hand import HandType
 from dexcontrol.robot import Robot
 
 

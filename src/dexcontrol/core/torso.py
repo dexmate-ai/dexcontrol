@@ -14,11 +14,14 @@ This module provides the Torso class for controlling a robot torso through Zenoh
 communication. It handles joint position and velocity control and state monitoring.
 """
 
+from typing import cast
+
 import numpy as np
-from dexcomm.serialization.protobuf import control_msg_pb2
+from dexbot_utils import RobotInfo
+from dexbot_utils.configs.components.vega_1 import Vega1TorsoConfig
+from dexcomm.codecs import JointCmdCodec, JointStateCodec
 from jaxtyping import Float
 
-from dexcontrol.config.core import TorsoConfig
 from dexcontrol.core.component import RobotJointComponent
 
 
@@ -35,26 +38,30 @@ class Torso(RobotJointComponent):
 
     def __init__(
         self,
-        configs: TorsoConfig,
+        name: str,
+        robot_info: RobotInfo,
     ) -> None:
         """Initialize the torso controller.
 
         Args:
-            configs: Torso configuration parameters containing communication topics
+            robot_info: RobotInfo instance.
                 and default velocity settings.
         """
+        joint_names = robot_info.get_component_joints(name)
+        joint_pos_limits = robot_info.get_joint_pos_limits(joint_names)
+        joint_vel_limits = robot_info.get_joint_vel_limits(joint_names)
+        config = robot_info.get_component_config(name)
+        config = cast(Vega1TorsoConfig, config)
         super().__init__(
-            state_sub_topic=configs.state_sub_topic,
-            control_pub_topic=configs.control_pub_topic,
-            state_message_type=control_msg_pb2.MotorStateWithCurrent,
-            joint_name=configs.joint_name,
-            joint_limit=configs.joint_limit
-            if hasattr(configs, "joint_limit")
-            else None,
-            joint_vel_limit=configs.joint_vel_limit
-            if hasattr(configs, "joint_vel_limit")
-            else None,
-            pose_pool=configs.pose_pool,
+            name=name,
+            state_sub_topic=config.state_sub_topic,
+            control_pub_topic=config.control_pub_topic,
+            state_decoder=JointStateCodec.decode,
+            control_encoder=JointCmdCodec.encode,
+            joint_name=joint_names,
+            joint_pos_limit=joint_pos_limits,
+            joint_vel_limit=joint_vel_limits,
+            pose_pool=config.pose_pool,
         )
         assert self._joint_vel_limit is not None, "joint_vel_limit is not set"
 
@@ -105,9 +112,9 @@ class Torso(RobotJointComponent):
         joint_pos = self._convert_joint_cmd_to_array(joint_pos)
         joint_vel = self._process_joint_velocities(joint_vel, joint_pos)
 
-        if self._joint_limit is not None:
+        if self._joint_pos_limit is not None:
             joint_pos = np.clip(
-                joint_pos, self._joint_limit[:, 0], self._joint_limit[:, 1]
+                joint_pos, self._joint_pos_limit[:, 0], self._joint_pos_limit[:, 1]
             )
         if self._joint_vel_limit is not None:
             joint_vel = np.clip(
@@ -115,10 +122,8 @@ class Torso(RobotJointComponent):
             )
 
         # Create and send control message
-        control_msg = control_msg_pb2.MotorPosVelCommand()
-        control_msg.pos.extend(joint_pos.tolist())
-        control_msg.vel.extend(joint_vel.tolist())
-        self._publish_control(control_msg)
+        data = dict(pos=joint_pos, vel=joint_vel)
+        self._publish_control(control_msg=data)
 
         # Wait if specified
         self._wait_for_position(

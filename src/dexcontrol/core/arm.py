@@ -14,20 +14,29 @@ This module provides the Arm class for controlling a robot arm through Zenoh
 communication and the ArmWrenchSensor class for reading wrench sensor data.
 """
 
+import threading
 import time
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
-from dexcomm import Publisher, call_service
-from dexcomm.serialization import serialize_protobuf
-from dexcomm.serialization.protobuf import control_msg_pb2, control_query_pb2
+from dexbot_utils import RobotInfo
+from dexbot_utils.configs.components.vega_1 import Vega1ArmConfig
+from dexcomm.codecs import (
+    DictDataCodec,
+    EEPassThroughCmdCodec,
+    JointCmdCodec,
+    JointModeCodec,
+    JointModeEnum,
+    JointStateCodec,
+    WrenchStateCodec,
+    WristButtonStateCodec,
+)
 from dexcomm.utils import RateLimiter
 from jaxtyping import Float
 from loguru import logger
+from rich.console import Console
 
-from dexcontrol.config.core.arm import ArmConfig
 from dexcontrol.core.component import RobotComponent, RobotJointComponent
-from dexcontrol.utils.comm_helper import get_zenoh_config_path
 from dexcontrol.utils.os_utils import resolve_key_name
 from dexcontrol.utils.trajectory_utils import generate_linear_trajectory
 
@@ -45,44 +54,90 @@ class Arm(RobotJointComponent):
 
     def __init__(
         self,
-        configs: ArmConfig,
+        name: str,
+        robot_info: RobotInfo,
     ) -> None:
         """Initialize the arm controller.
 
         Args:
-            configs: Configuration parameters for the arm including communication topics.
+            name: Component name.
+            robot_info: RobotInfo instance (kept for compatibility).
         """
+        joint_names = robot_info.get_component_joints(name)
+        joint_pos_limits = robot_info.get_joint_pos_limits(joint_names)
+        joint_vel_limit = robot_info.get_joint_vel_limits(joint_names)
+        config = robot_info.get_component_config(name)
+        config = cast(Vega1ArmConfig, config)
         super().__init__(
-            state_sub_topic=configs.state_sub_topic,
-            control_pub_topic=configs.control_pub_topic,
-            state_message_type=control_msg_pb2.MotorStateWithCurrent,
-            joint_name=configs.joint_name,
-            joint_limit=configs.joint_limit
-            if hasattr(configs, "joint_limit")
-            else None,
-            joint_vel_limit=configs.joint_vel_limit
-            if hasattr(configs, "joint_vel_limit")
-            else None,
-            pose_pool=configs.pose_pool,
+            name=name,
+            state_sub_topic=config.state_sub_topic,
+            control_pub_topic=config.control_pub_topic,
+            control_encoder=JointCmdCodec.encode,
+            state_decoder=JointStateCodec.decode,
+            joint_name=joint_names,
+            joint_pos_limit=joint_pos_limits,
+            joint_vel_limit=joint_vel_limit,
+            pose_pool=config.pose_pool,
         )
-
-        # Note: Mode querier functionality will need to be updated to use DexComm
-        # For now, we'll store the query topic for later use
-        self._mode_query_topic = resolve_key_name(configs.set_mode_query)
-
+        self._side = config.side
         # Initialize wrench sensor if configured
         self.wrench_sensor: ArmWrenchSensor | None = None
-        if configs.wrench_sub_topic:
-            self.wrench_sensor = ArmWrenchSensor(configs.wrench_sub_topic)
+        if config.wrench_sub_topic:
+            wrench_sensor_name = f"{name}_wrench_sensor"
+            self.wrench_sensor = ArmWrenchSensor(
+                wrench_sensor_name,
+                config.wrench_sub_topic,
+                config.wrist_button_sub_topic,
+            )
 
-        # Initialize end effector pass through publisher using DexComm
-        self._ee_pass_through_publisher = Publisher(
-            topic=resolve_key_name(configs.ee_pass_through_pub_topic),
-            serializer=serialize_protobuf,
-            config=get_zenoh_config_path(),
+        # Initialize end effector pass through publisher and subscriber using DexComm
+        self.enable_ee_pass_through = config.enable_ee_pass_through
+        self._ee_pass_through_lock = threading.Lock()
+        self._latest_ee_pass_through_data: dict[str, Any] | None = None
+        if self.enable_ee_pass_through:
+            self._ee_pass_through_publisher = self._node.create_publisher(
+                topic=resolve_key_name(config.ee_pass_through_pub_topic),
+                encoder=EEPassThroughCmdCodec.encode,
+            )
+            # Subscribe to EE pass-through response topic
+            self._ee_pass_through_subscriber = self._node.create_subscriber(
+                topic=f"state/ee_pass_through/{config.side}",
+                callback=self._on_ee_pass_through_update,
+                decoder=EEPassThroughCmdCodec.decode,
+            )
+
+        self._mode_querier = self._node.create_service_client(
+            service_name=config.set_mode_query,
+            request_encoder=JointModeCodec.encode,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
         )
 
-        self._default_control_hz = configs.default_control_hz
+        # PID configuration service client
+        self._pid_querier = self._node.create_service_client(
+            service_name=f"system/arm_pid/{config.side}",
+            request_encoder=DictDataCodec.encode,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
+        )
+
+        # Brake release service client
+        self._brake_querier = self._node.create_service_client(
+            service_name=f"system/arm_brake/{config.side}",
+            request_encoder=DictDataCodec.encode,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
+        )
+
+        # End-effector baud rate service client
+        self._ee_baud_rate_querier = self._node.create_service_client(
+            service_name=f"system/ee_baud_rate/{config.side}",
+            request_encoder=DictDataCodec.encode,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
+        )
+
+        self._default_control_hz = config.default_control_hz
         if self._joint_vel_limit is not None:
             if np.any(self._joint_vel_limit > 2.8):
                 logger.warning(
@@ -108,7 +163,7 @@ class Arm(RobotJointComponent):
         logger.warning("arm.set_mode() is deprecated, use set_modes() instead")
         self.set_modes([mode] * 7)
 
-    def set_modes(self, modes: list[Literal["position", "disable", "release"]]) -> None:
+    def set_modes(self, modes: list[Literal["position", "disable"]]) -> None:
         """Sets the operating modes of the arm.
 
         Args:
@@ -118,9 +173,8 @@ class Arm(RobotJointComponent):
             ValueError: If any mode in the list is invalid.
         """
         mode_map = {
-            "position": control_query_pb2.SetArmMode.Mode.POSITION,
-            "disable": control_query_pb2.SetArmMode.Mode.DISABLE,
-            "release": control_query_pb2.SetArmMode.Mode.CURRENT,
+            "position": JointModeEnum.POSITION,
+            "disable": JointModeEnum.DISABLE,
         }
 
         for mode in modes:
@@ -133,18 +187,15 @@ class Arm(RobotJointComponent):
             raise ValueError("Arm modes length must match arm DoF (7).")
 
         converted_modes = [mode_map[mode] for mode in modes]
-        query_msg = control_query_pb2.SetArmMode(modes=converted_modes)
-        # Use DexComm's call_service for mode setting
-        from dexcontrol.utils.comm_helper import get_zenoh_config_path
+        query_msg = {"mode": converted_modes}
 
-        call_service(
-            self._mode_query_topic,
-            request=query_msg,
-            timeout=3.0,
-            config=get_zenoh_config_path(),
-            request_serializer=lambda x: x.SerializeToString(),
-            response_deserializer=None,
-        )
+        # Wait for service to be available before calling
+        if not self._mode_querier.wait_for_service(timeout=5.0):
+            logger.warning(
+                f"{self._mode_querier.get_stats()['service_name']}: Mode service not available, command may fail"
+            )
+
+        self._mode_querier.call(query_msg)
 
     def _send_position_command(self, joint_pos: np.ndarray) -> None:
         """Send joint position command.
@@ -152,8 +203,7 @@ class Arm(RobotJointComponent):
         Args:
             joint_pos: Joint positions as numpy array.
         """
-        control_msg = control_msg_pb2.MotorPosVelCurrentCommand()
-        control_msg.pos.extend(joint_pos.tolist())
+        control_msg = {"pos": joint_pos}
         self._publish_control(control_msg)
 
     def set_joint_pos(
@@ -201,9 +251,11 @@ class Arm(RobotJointComponent):
             self._resolve_relative_joint_cmd(joint_pos) if relative else joint_pos
         )
         resolved_joint_pos = self._convert_joint_cmd_to_array(resolved_joint_pos)
-        if self._joint_limit is not None:
+        if self._joint_pos_limit is not None:
             resolved_joint_pos = np.clip(
-                resolved_joint_pos, self._joint_limit[:, 0], self._joint_limit[:, 1]
+                resolved_joint_pos,
+                self._joint_pos_limit[:, 0],
+                self._joint_pos_limit[:, 1],
             )
 
         if wait_time > 0.0:
@@ -306,20 +358,196 @@ class Arm(RobotJointComponent):
             self._resolve_relative_joint_cmd(joint_pos) if relative else joint_pos
         )
         resolved_joint_pos = self._convert_joint_cmd_to_array(resolved_joint_pos)
-        if self._joint_limit is not None:
+        if self._joint_pos_limit is not None:
             resolved_joint_pos = np.clip(
-                resolved_joint_pos, self._joint_limit[:, 0], self._joint_limit[:, 1]
+                resolved_joint_pos,
+                self._joint_pos_limit[:, 0],
+                self._joint_pos_limit[:, 1],
             )
         target_pos = resolved_joint_pos
         target_vel = self._convert_joint_cmd_to_array(
             joint_vel, clip_value=self._joint_vel_limit
         )
 
-        control_msg = control_msg_pb2.MotorPosVelCurrentCommand(
-            pos=list(target_pos),
-            vel=list(target_vel),
-        )
+        control_msg = {
+            "pos": target_pos,
+            "vel": target_vel,
+        }
         self._publish_control(control_msg)
+
+    def set_pid(
+        self,
+        p_multipliers: list[float],
+        i_multipliers: list[float] = [],
+        d_multipliers: list[float] = [],
+    ) -> dict[str, Any]:
+        """Set PID P-gain multipliers for the arm joints.
+
+        This sets the position P-gain multipliers for all 7 arm joints.
+        The multipliers are applied to the factory default PID values.
+        Currently, only the modification of P value is supported
+
+        Args:
+            p_multipliers: List of 7 P-gain multipliers, one for each joint.
+
+        Returns:
+            Dictionary with 'success' (bool), 'p' (list), and 'message' (str).
+
+        Raises:
+            RuntimeError: If the service is not available or the operation fails.
+        """
+        if i_multipliers != [] or d_multipliers != []:
+            logger.warning("Only the modification of P value is supported for now")
+        del i_multipliers, d_multipliers
+
+        if len(p_multipliers) != 7:
+            raise ValueError("p_multipliers must have exactly 7 values (one per joint)")
+
+        if not self._pid_querier.wait_for_service(timeout=5.0):
+            raise RuntimeError(f"PID service not available for {self._side} arm")
+
+        query_msg = {"p": p_multipliers}
+
+        # Use rich progress indicator since PID setting takes ~40s
+        # (factory mode entry/exit + flash save + verification)
+        console = Console()
+        with console.status(
+            f"[bold green]Setting PID for {self._side} arm (~40 seconds)..."
+        ):
+            response = self._pid_querier.call(query_msg, timeout=45.0)
+
+        if response is None:
+            raise RuntimeError(f"Failed to set PID for {self._side} arm: no response")
+        return response
+
+    def get_pid(self) -> dict[str, Any]:
+        """Get current PID P-gain multipliers for the arm joints.
+
+        Returns:
+            Dictionary with 'success' (bool), 'p' (list of 7 multipliers), and 'message' (str).
+
+        Raises:
+            RuntimeError: If the service is not available or the operation fails.
+        """
+        if not self._pid_querier.wait_for_service(timeout=5.0):
+            raise RuntimeError(f"PID service not available for {self._side} arm")
+
+        response = self._pid_querier.call({})
+        if response is None:
+            response = {
+                "success": False,
+                "message": "Response time out from PID service",
+            }
+        return response
+
+    def release_brake(
+        self, enable: bool, joints: list[int] | None = None
+    ) -> dict[str, Any]:
+        """Enable or disable brake release (over-limit drag) for the arm.
+
+        When brake release is enabled, the arm can be manually moved beyond
+        normal position limits. This is useful for calibration or recovery.
+
+        Args:
+            enable: True to enable brake release, False to disable.
+            joints: Optional list of joint indices (0-6) to operate on.
+                If None, operates on all joints. Ignored when disabling.
+
+        Returns:
+            Dictionary with 'success' (bool) and 'message' (str).
+
+        Raises:
+            RuntimeError: If the service is not available or the operation fails.
+        """
+        if not self._brake_querier.wait_for_service(timeout=5.0):
+            raise RuntimeError(f"Brake service not available for {self._side} arm")
+
+        query_msg: dict[str, Any] = {"enable": enable}
+        if joints is not None:
+            query_msg["joints"] = joints
+
+        # Use rich progress indicator since brake release takes time
+        # (motor mode changes + safety verification)
+        action = "Releasing" if enable else "Engaging"
+        console = Console()
+        with console.status(f"[bold green]{action} brake for {self._side} arm..."):
+            response = self._brake_querier.call(query_msg, timeout=45.0)
+
+        if response is None:
+            response = {
+                "success": False,
+                "message": "Response time out from brake service",
+            }
+        return response
+
+    def get_brake_status(self) -> dict[str, Any]:
+        """Get current brake release status for the arm.
+
+        Returns:
+            Dictionary with:
+                - 'success' (bool): Whether the query succeeded
+                - 'enabled' (bool): Whether brake release is currently enabled
+                - 'joints' (list): List of joints with brake released
+                - 'message' (str): Status message
+
+        Raises:
+            RuntimeError: If the service is not available or the operation fails.
+        """
+        if not self._brake_querier.wait_for_service(timeout=5.0):
+            raise RuntimeError(f"Brake service not available for {self._side} arm")
+
+        response = self._brake_querier.call({})
+        if response is None:
+            raise RuntimeError(
+                f"Failed to get brake status for {self._side} arm: no response"
+            )
+        return response
+
+    def set_ee_baud_rate(self, baud_rate: int) -> dict[str, Any]:
+        """Set the end-effector RS485 baud rate.
+
+        Args:
+            baud_rate: Baud rate value (e.g., 115200, 1000000).
+
+        Returns:
+            Dictionary with 'success' (bool), 'baud_rate' (int), and 'message' (str).
+
+        Raises:
+            RuntimeError: If the service is not available or the operation fails.
+        """
+        if not self._ee_baud_rate_querier.wait_for_service(timeout=5.0):
+            raise RuntimeError(
+                f"EE baud rate service not available for {self._side} arm"
+            )
+
+        query_msg = {"baud_rate": baud_rate}
+        response = self._ee_baud_rate_querier.call(query_msg)
+        if response is None:
+            raise RuntimeError(
+                f"Failed to set EE baud rate for {self._side} arm: no response"
+            )
+        return response
+
+    def get_ee_baud_rate(self) -> dict[str, Any]:
+        """Get the current end-effector RS485 baud rate.
+
+        Returns:
+            Dictionary with 'success' (bool), 'baud_rate' (int), and 'message' (str).
+
+        Raises:
+            RuntimeError: If the service is not available or the operation fails.
+        """
+        if not self._ee_baud_rate_querier.wait_for_service(timeout=5.0):
+            raise RuntimeError(
+                f"EE baud rate service not available for {self._side} arm"
+            )
+
+        response = self._ee_baud_rate_querier.call({})
+        if response is None:
+            raise RuntimeError(
+                f"Failed to get EE baud rate for {self._side} arm: no response"
+            )
+        return response
 
     def shutdown(self) -> None:
         """Cleans up all Zenoh resources."""
@@ -338,14 +566,45 @@ class Arm(RobotJointComponent):
         if self.wrench_sensor:
             self.wrench_sensor.shutdown()
 
-    def send_ee_pass_through_message(self, message: bytes):
+    def send_ee_pass_through_message(self, message: bytes) -> None:
         """Send an end effector pass through message to the robot arm.
 
+        This method is only available when the end effector type is UNKNOWN.
+        When a known end effector (Hand or DexGripper) is detected, the server
+        does not create the EE pass-through subscriber and this method should
+        not be called. The `enable_ee_pass_through` config flag controls whether
+        this functionality is enabled.
+
         Args:
-            message: The message to send to the robot arm.
+            message: The raw bytes message to send to the end effector via RS485.
         """
-        control_msg = control_msg_pb2.EndEffectorPassThroughCommand(data=message)
-        self._ee_pass_through_publisher.publish(control_msg)
+        self._ee_pass_through_publisher.publish(message)
+
+    def _on_ee_pass_through_update(self, data: dict[str, Any]) -> None:
+        """Handle incoming EE pass-through response updates.
+
+        Args:
+            data: Decoded EE pass-through response data.
+        """
+        with self._ee_pass_through_lock:
+            self._latest_ee_pass_through_data = data
+
+    def get_ee_pass_through_response(self) -> dict[str, Any] | None:
+        """Get the latest end-effector pass-through response data.
+
+        This method is only available when the end effector type is UNKNOWN.
+        When a known end effector (Hand or DexGripper) is detected, the server
+        does not publish EE pass-through responses and this method will always
+        return None. The `enable_ee_pass_through` config flag controls whether
+        the subscriber is created.
+
+        Returns:
+            Dictionary containing the response data with 'data' key holding
+            a list of bytes, or None if no response has been received yet
+            or if EE pass-through is not enabled.
+        """
+        with self._ee_pass_through_lock:
+            return self._latest_ee_pass_through_data
 
 
 class ArmWrenchSensor(RobotComponent):
@@ -354,16 +613,33 @@ class ArmWrenchSensor(RobotComponent):
     This class provides methods to read wrench sensor data through Zenoh communication.
     """
 
-    def __init__(self, state_sub_topic: str) -> None:
+    def __init__(self, name: str, state_sub_topic: str, button_sub_topic: str) -> None:
         """Initialize the wrench sensor reader.
 
         Args:
             state_sub_topic: Topic to subscribe to for wrench sensor data.
         """
         super().__init__(
+            name=name,
             state_sub_topic=state_sub_topic,
-            state_message_type=control_msg_pb2.WrenchState,
+            state_decoder=WrenchStateCodec.decode,
         )
+        self._button_lock = threading.Lock()
+        self._latest_button_state: Any | None = None
+        self._button_subscriber = self._node.create_subscriber(
+            topic=button_sub_topic,
+            callback=self._on_button_update,
+            decoder=WristButtonStateCodec.decode,
+        )
+
+    def _on_button_update(self, state: Any) -> None:
+        """Handle incoming button updates.
+
+        Args:
+            state: Decoded protobuf button state message.
+        """
+        with self._button_lock:
+            self._latest_button_state = state
 
     def get_wrench_state(self) -> Float[np.ndarray, "6"]:
         """Get the current wrench sensor reading.
@@ -372,29 +648,31 @@ class ArmWrenchSensor(RobotComponent):
             Array of wrench values [fx, fy, fz, tx, ty, tz].
         """
         state = self._get_state()
-        return np.array(state.wrench, dtype=np.float32)
+        return np.array(state["wrench"], dtype=np.float32)
 
-    def get_button_state(self) -> tuple[bool, bool]:
+    def get_button_state(self) -> dict[str, bool]:
         """Get the state of the wrench sensor buttons.
 
         Returns:
             Tuple of (blue_button_state, green_button_state).
         """
-        state = self._get_state()
-        return state.blue_button, state.green_button
+        with self._button_lock:
+            state = self._latest_button_state
+        if state is None:
+            return dict(blue_button=False, green_button=False)
+        return dict(
+            blue_button=state["blue_button"], green_button=state["green_button"]
+        )
 
-    def get_state(self) -> dict[str, Float[np.ndarray, "6"] | bool]:
+    def get_state(self) -> dict[str, Any]:
         """Get the complete wrench sensor state.
 
         Returns:
             Dictionary containing wrench values and button states.
         """
-        state = self._get_state()
-        return {
-            "wrench": np.array(state.wrench, dtype=np.float32),
-            "blue_button": state.blue_button,
-            "green_button": state.green_button,
-        }
+        wrench_state = self.get_wrench_state()
+        button_state = self.get_button_state()
+        return dict(wrench=wrench_state, **button_state)
 
     def get_blue_button_state(self) -> bool:
         """Get the state of the blue button.
@@ -402,8 +680,8 @@ class ArmWrenchSensor(RobotComponent):
         Returns:
             True if the blue button is pressed, False otherwise.
         """
-        state = self._get_state()
-        return state.blue_button
+        button_state = self.get_button_state()
+        return button_state["blue_button"]
 
     def get_green_button_state(self) -> bool:
         """Get the state of the green button.
@@ -411,5 +689,5 @@ class ArmWrenchSensor(RobotComponent):
         Returns:
             True if the green button is pressed, False otherwise.
         """
-        state = self._get_state()
-        return state.green_button
+        button_state = self.get_button_state()
+        return button_state["green_button"]

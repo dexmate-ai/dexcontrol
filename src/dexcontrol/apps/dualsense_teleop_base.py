@@ -19,7 +19,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import Enum
 
-from dexcomm.utils import RateLimiter
+from dexcomm import RateLimiter
 from dualsense_controller import DualSenseController
 from loguru import logger
 

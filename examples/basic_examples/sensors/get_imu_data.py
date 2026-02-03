@@ -20,14 +20,14 @@ import time
 
 import numpy as np
 import tyro
-from dexcomm.utils import RateLimiter
+from dexcomm import RateLimiter
 from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
-from dexcontrol.config.vega import get_vega_config
+from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
 
 
@@ -75,7 +75,11 @@ def create_imu_table(imu_data, title):
             if key == "timestamp_ns":
                 # Display timestamp in seconds
                 table.add_row("Timestamp (s)", f"{value / 1e9:.3f}", "-", "-", "-")
-            elif isinstance(value, np.ndarray):
+            elif key == "sequence":
+                # Display sequence number
+                table.add_row("Sequence", str(value), "-", "-", "-")
+            elif isinstance(value, (np.ndarray, list)):
+                # Handle both numpy arrays and lists
                 display_name = param_info.get(key, (key, len(value)))[0]
                 if len(value) == 3:
                     table.add_row(
@@ -178,9 +182,9 @@ def main(fps: float = 100.0):
         fps: Display update rate in Hz (default: 100.0)
     """
     # Initialize robot with IMU sensors enabled
-    configs = get_vega_config()
-    configs.sensors.head_imu.enable = True
-    configs.sensors.base_imu.enable = True
+    configs = get_robot_config()
+    configs.sensors["head_imu"].enabled = True
+    configs.sensors["base_imu"].enabled = True
 
     with Robot(configs=configs) as robot:
         # Wait for IMU sensors to become active

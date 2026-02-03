@@ -17,8 +17,8 @@ subscriber for scan data.
 from typing import Any
 
 import numpy as np
-
-from dexcontrol.comm import create_lidar_subscriber
+from dexcomm import Node
+from dexcomm.codecs import LidarScan2DCodec
 
 
 class RPLidarSensor:
@@ -30,6 +30,7 @@ class RPLidarSensor:
 
     def __init__(
         self,
+        name,
         configs,
     ) -> None:
         """Initialize the LIDAR sensor.
@@ -37,10 +38,12 @@ class RPLidarSensor:
         Args:
             configs: Configuration for the LIDAR sensor.
         """
-        self._name = configs.name
-
+        self._name = name
+        self._node = Node(name=self._name)
         # Create the LIDAR subscriber
-        self._subscriber = create_lidar_subscriber(
+        self._subscriber = self._node.create_subscriber(
+            callback=None,
+            decoder=LidarScan2DCodec.decode,
             topic=configs.topic
         )
 
@@ -55,8 +58,7 @@ class RPLidarSensor:
         Returns:
             True if receiving data, False otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data is not None
+        return self._subscriber.is_active(0.5)
 
     def wait_for_active(self, timeout: float = 5.0) -> bool:
         """Wait for the LIDAR sensor to start receiving data.
@@ -91,7 +93,7 @@ class RPLidarSensor:
             Array of range measurements in meters if available, None otherwise.
         """
         data = self._subscriber.get_latest()
-        return data.ranges if data else None
+        return data['ranges'] if data else None
 
     def get_angles(self) -> np.ndarray | None:
         """Get the latest angle measurements.
@@ -100,7 +102,7 @@ class RPLidarSensor:
             Array of angle measurements in radians if available, None otherwise.
         """
         data = self._subscriber.get_latest()
-        return data.angles if data else None
+        return data['angles'] if data else None
 
     def get_qualities(self) -> np.ndarray | None:
         """Get the latest quality measurements.
@@ -109,7 +111,7 @@ class RPLidarSensor:
             Array of quality values (0-255) if available, None otherwise.
         """
         data = self._subscriber.get_latest()
-        return data.qualities if data else None
+        return data['intensities'] if data else None
 
     def get_point_count(self) -> int:
         """Get the number of points in the latest scan.
@@ -121,23 +123,6 @@ class RPLidarSensor:
         if ranges is not None:
             return len(ranges)
         return 0
-
-    def has_qualities(self) -> bool:
-        """Check if the latest scan data includes quality information.
-
-        Returns:
-            True if quality data is available, False otherwise.
-        """
-        return self._subscriber.has_qualities()
-
-    @property
-    def fps(self) -> float:
-        """Get the current FPS measurement.
-
-        Returns:
-            Current frames per second measurement.
-        """
-        return self._subscriber.fps
 
     @property
     def name(self) -> str:

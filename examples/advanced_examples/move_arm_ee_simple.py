@@ -16,7 +16,7 @@ relative to their current pose.
 
 import numpy as np
 import tyro
-from dexcomm.utils.rate_limiter import RateLimiter
+from dexcomm import RateLimiter
 from dexmotion.motion_manager import MotionManager
 
 from dexcontrol.robot import Robot
@@ -51,9 +51,14 @@ def main() -> None:
     # Initialize robot and get current joint positions
     bot = Robot()
     control_hz = 250
-    initial_joint_pos = bot.get_joint_pos_dict(
-        component=["left_arm", "right_arm", "torso", "head"]
-    )
+    if bot.robot_model == "vega_1u":
+        initial_joint_pos = bot.get_joint_pos_dict(
+            component=["left_arm", "right_arm", "head"]
+        )
+    else:
+        initial_joint_pos = bot.get_joint_pos_dict(
+            component=["left_arm", "right_arm", "torso", "head"]
+        )
 
     # Create task instance with initial joint configuration
     mm = MotionManager(initial_joint_configuration_dict=initial_joint_pos)

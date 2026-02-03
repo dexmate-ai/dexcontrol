@@ -16,14 +16,28 @@ and displays it in a live animated Cartesian plot.
 
 import time
 
+import matplotlib
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 import tyro
+from dexcontrol.config.vega import get_vega_config
 from loguru import logger
 
-from dexcontrol.config.vega import get_vega_config
 from dexcontrol.robot import Robot
+
+try:
+    # Try TkAgg backend first (more reliable for live display)
+    matplotlib.use("TkAgg")
+    print("Using TkAgg backend for display")
+except ImportError:
+    try:
+        # Fallback to Qt5Agg
+        matplotlib.use("Qt5Agg")
+        print("Using Qt5Agg backend for display")
+    except ImportError:
+        # Last resort - use default
+        print("Using default matplotlib backend")
 
 
 class LiveLidarPlotter:
@@ -135,9 +149,32 @@ class LiveLidarPlotter:
                 return self.scatter, self.text_info
 
             # Extract scan data
-            ranges = scan_data["ranges"]
-            angles = scan_data["angles"]
+            ranges = np.asarray(scan_data.get("ranges", []), dtype=float).reshape(-1)
+            angles = np.asarray(scan_data.get("angles", []), dtype=float).reshape(-1)
             qualities = scan_data.get("qualities")
+            if qualities is not None:
+                qualities = np.asarray(qualities).reshape(-1)
+
+            # Guard: no data
+            if ranges.size == 0 or angles.size == 0:
+                return self.scatter, self.text_info
+
+            # Align lengths if mismatched
+            if ranges.size != angles.size:
+                min_len = min(ranges.size, angles.size)
+                ranges = ranges[:min_len]
+                angles = angles[:min_len]
+                if qualities is not None and qualities.size >= min_len:
+                    qualities = qualities[:min_len]
+
+            # Filter invalid and non-positive ranges
+            valid_mask = np.isfinite(ranges) & np.isfinite(angles) & (ranges > 0)
+            if not np.any(valid_mask):
+                return self.scatter, self.text_info
+            ranges = ranges[valid_mask]
+            angles = angles[valid_mask]
+            if qualities is not None and qualities.size == valid_mask.size:
+                qualities = qualities[valid_mask]
 
             # Convert to Cartesian coordinates
             x = ranges * np.cos(angles)
@@ -148,12 +185,17 @@ class LiveLidarPlotter:
                 self.scatter.remove()
 
             # Color points based on distance for better visualization
-            colors = (
-                plt.cm.viridis(ranges / np.max(ranges)) if len(ranges) > 0 else "blue"
-            )
+            if ranges.size > 0:
+                max_r = np.max(ranges)
+                colors = plt.cm.viridis(ranges / max_r) if max_r > 0 else "blue"
+            else:
+                colors = "blue"
             self.scatter = self.ax.scatter(
                 x, y, s=3, c=colors, alpha=0.7, cmap="viridis"
             )
+
+            # Dynamically update plot limits based on current points
+            self._update_plot_limits(x, y)
 
             # Update info text
             self.scan_count += 1

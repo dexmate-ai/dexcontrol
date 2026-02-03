@@ -16,27 +16,29 @@ types including hand type detection, version information, status queries, and co
 operations.
 """
 
-import json
 import time
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import Any, Literal
+
+import numpy as np
+from dexbot_utils import RobotInfo
+from dexbot_utils.configs import BaseRobotConfig
+from dexbot_utils.hand import HandType
+from dexcomm import Node
 
 # Use DexComm for all communication
-from dexcomm import call_service
-from dexcomm.serialization.protobuf import control_query_pb2
+from dexcomm.codecs import (
+    ClearErrorCodec,
+    DictDataCodec,
+    RebootComponentCodec,
+    RobotComponentEnum,
+    RobotComponentStatesCodec,
+)
 from loguru import logger
 
-from dexcontrol.config.vega import VegaConfig, get_vega_config
-from dexcontrol.core.hand import HandType
-from dexcontrol.utils.comm_helper import get_zenoh_config_path
-from dexcontrol.utils.os_utils import resolve_key_name
 from dexcontrol.utils.pb_utils import (
     ComponentStatus,
-    status_to_dict,
 )
 from dexcontrol.utils.viz_utils import show_component_status
-
-if TYPE_CHECKING:
-    from dexcontrol.config.vega import VegaConfig
 
 
 class RobotQueryInterface:
@@ -51,15 +53,52 @@ class RobotQueryInterface:
         ...     version_info = interface.get_version_info()
     """
 
-    def __init__(self, configs: "VegaConfig"):
+    def __init__(self, configs: BaseRobotConfig):
         """Initialize the RobotQueryInterface.
 
         Args:
+            name: Name of the robot query interface component Node.
             configs: Robot configuration containing query names.
         """
         # Session parameter kept for compatibility but not used
         self._configs = configs
-        self._owns_session = False
+        self._node = Node(name="robot_query_interface")
+        self._hand_querier = self._node.create_service_client(
+            service_name=configs.querables["hand_info"],
+            request_encoder=None,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
+        )
+        self._ntp_querier = self._node.create_service_client(
+            service_name=configs.querables["soc_ntp"],
+            request_encoder=DictDataCodec.encode,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
+        )
+        self._version_querier = self._node.create_service_client(
+            service_name=configs.querables["version_info"],
+            request_encoder=None,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
+        )
+        self._component_status_querier = self._node.create_service_client(
+            service_name=configs.querables["status_info"],
+            request_encoder=None,
+            response_decoder=RobotComponentStatesCodec.decode,
+            timeout=5.0,
+        )
+        self._reboot_querier = self._node.create_service_client(
+            service_name=configs.querables["reboot"],
+            request_encoder=RebootComponentCodec.encode,
+            response_decoder=None,
+            timeout=5.0,
+        )
+        self._clear_error_querier = self._node.create_service_client(
+            service_name=configs.querables["clear_error"],
+            request_encoder=ClearErrorCodec.encode,
+            response_decoder=None,
+            timeout=5.0,
+        )
 
     @classmethod
     def create(cls) -> "RobotQueryInterface":
@@ -78,9 +117,9 @@ class RobotQueryInterface:
             >>> query_interface.close()
         """
         # DexComm handles session internally, we just need config
-        config: VegaConfig = get_vega_config()
-        instance = cls(config)
-        instance._owns_session = True
+        config: BaseRobotConfig = RobotInfo().config
+        instance = cls(configs=config)
+
         return instance
 
     def close(self) -> None:
@@ -89,9 +128,7 @@ class RobotQueryInterface:
         This method should be called when done using a standalone
         RobotQueryInterface to properly clean up resources.
         """
-        if self._owns_session:
-            # DexComm cleanup is handled automatically
-            logger.debug("DexComm session cleanup handled automatically")
+        self._node.shutdown()
 
     def __enter__(self) -> "RobotQueryInterface":
         """Enter context manager."""
@@ -101,7 +138,7 @@ class RobotQueryInterface:
         """Exit context manager and clean up resources."""
         self.close()
 
-    def query_hand_type(self) -> dict[str, HandType]:
+    def query_hand_type(self, max_attempts: int = 5) -> dict[str, HandType]:
         """Query the hand type information from the server.
 
         Returns:
@@ -113,43 +150,34 @@ class RobotQueryInterface:
         Raises:
             RuntimeError: If hand type information cannot be retrieved after 3 attempts.
         """
-        full_topic = resolve_key_name(self._configs.hand_info_query_name)
-        max_attempts = 3
         last_error = None
 
+        # Wait for service to be available
+        if not self._hand_querier.wait_for_service(timeout=5.0):
+            raise RuntimeError("Hand type query service not available")
+
         for _ in range(max_attempts):
-            try:
-                # Query hand type using DexComm service
-                response = call_service(
-                    full_topic,
-                    timeout=10.0,
-                    config=get_zenoh_config_path(),
-                    request_serializer=None,
-                    response_deserializer=None,
-                )
+            response = self._hand_querier.call(None)
 
-                if response:
-                    payload_str = response.decode("utf-8")
-                    hand_info = json.loads(payload_str)
+            if response:
+                hand_info = response
 
-                    # Validate the expected format
-                    if (
-                        isinstance(hand_info, dict)
-                        and "left" in hand_info
-                        and "right" in hand_info
-                    ):
-                        logger.info(f"End effector hand types: {hand_info}")
-                        return {
-                            "left": HandType(hand_info["left"]),
-                            "right": HandType(hand_info["right"]),
-                        }
-                    else:
-                        last_error = f"Invalid response format: {hand_info}"
+                # Validate the expected format
+                if (
+                    isinstance(hand_info, dict)
+                    and "left" in hand_info
+                    and "right" in hand_info
+                ):
+                    logger.info(f"End effector hand types: {hand_info}")
+                    return {
+                        "left": HandType(hand_info["left"]),
+                        "right": HandType(hand_info["right"]),
+                    }
                 else:
-                    last_error = "No response received from server"
-
-            except Exception as e:
-                last_error = str(e)
+                    last_error = f"Invalid response format: {hand_info}"
+            else:
+                time.sleep(0.2)
+                last_error = "No response received from server"
 
         # All attempts failed, raise error
         error_msg = f"Failed to query hand type after {max_attempts} attempts"
@@ -161,7 +189,6 @@ class RobotQueryInterface:
         self,
         sample_count: int = 30,
         show: bool = False,
-        timeout: float = 1.0,
         device: Literal["soc", "jetson"] = "soc",
     ) -> dict[Literal["success", "offset", "rtt"], bool | float]:
         """Query the NTP server via zenoh for time synchronization and compute robust statistics.
@@ -178,9 +205,7 @@ class RobotQueryInterface:
                 - "offset": Mean offset (in seconds) after removing RTT outliers.
                 - "rtt": Mean round-trip time (in seconds) after removing RTT outliers.
         """
-        if device == "soc":
-            ntp_key = resolve_key_name(self._configs.soc_ntp_query_name)
-        elif device == "jetson":
+        if device == "jetson":
             raise NotImplementedError("Jetson NTP query is not implemented yet")
 
         time_offset = []
@@ -188,30 +213,22 @@ class RobotQueryInterface:
 
         reply_count = 0
         for i in range(sample_count):
-            request = control_query_pb2.NTPRequest()
-            request.client_send_time_ns = time.time_ns()
-            request.sample_count = sample_count
-            request.sample_index = i
+            request_data = dict(
+                client_send_time_ns=time.time_ns(),
+                sample_count=sample_count,
+                sample_index=i,
+            )
 
             # Use call_service for NTP query
             try:
-                response_data = call_service(
-                    ntp_key,
-                    request=request,
-                    timeout=timeout,
-                    config=get_zenoh_config_path(),
-                    request_serializer=lambda x: x.SerializeToString(),
-                    response_deserializer=None,
-                )
+                response_data = self._ntp_querier.call(request_data)
 
                 if response_data:
                     reply_count += 1
                     client_receive_time_ns = time.time_ns()
-                    response = control_query_pb2.NTPResponse()
-                    response.ParseFromString(response_data)
-                    t0 = request.client_send_time_ns
-                    t1 = response.server_receive_time_ns
-                    t2 = response.server_send_time_ns
+                    t0 = request_data["client_send_time_ns"]
+                    t1 = response_data["server_receive_time_ns"]
+                    t2 = response_data["server_send_time_ns"]
                     t3 = client_receive_time_ns
                     offset = ((t1 - t0) + (t2 - t3)) // 2 / 1e9
                     rtt = (t3 - t0) / 1e9
@@ -226,7 +243,6 @@ class RobotQueryInterface:
             return {"success": False, "offset": 0.0, "rtt": 0.0}
 
         # Compute simple NTP statistics
-        import numpy as np
 
         stats = {
             "offset (mean)": float(np.mean(time_offset)) if time_offset else 0.0,
@@ -275,41 +291,17 @@ class RobotQueryInterface:
             RuntimeError: If version information cannot be retrieved.
         """
         try:
-            response = call_service(
-                resolve_key_name(self._configs.version_info_name),
-                timeout=5.0,
-                config=get_zenoh_config_path(),
-                request_serializer=None,
-                response_deserializer=None,
-            )
+            # Wait for service to be available
+            if not self._version_querier.wait_for_service(timeout=5.0):
+                raise RuntimeError("Version info service not available")
 
-            if response:
-                try:
-                    # Parse JSON response directly
-                    if isinstance(response, bytes):
-                        payload_str = response.decode("utf-8")
-                    else:
-                        payload_str = response
-                    version_info = json.loads(payload_str)
-
-                    # Validate expected structure
-                    if (
-                        isinstance(version_info, dict)
-                        and "server" in version_info
-                        and "client" in version_info
-                    ):
-                        if show:
-                            self._show_version_info(version_info)
-                        return version_info
-                    else:
-                        logger.warning(
-                            f"Invalid version info format received: {version_info}"
-                        )
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    logger.warning(f"Failed to parse version info response: {e}")
-
-            raise RuntimeError("No valid version information received from server")
-
+            version_info = self._version_querier.call(None)
+            if version_info:
+                if show:
+                    self._show_version_info(version_info)
+                return version_info
+            else:
+                raise RuntimeError("No valid version information received from server")
         except Exception as e:
             raise RuntimeError(f"Failed to retrieve version information: {e}") from e
 
@@ -328,26 +320,15 @@ class RobotQueryInterface:
             RuntimeError: If status information cannot be retrieved.
         """
         try:
-            response = call_service(
-                resolve_key_name(self._configs.status_info_name),
-                timeout=2.0,
-                config=get_zenoh_config_path(),
-                request_serializer=None,
-                response_deserializer=None,
-            )
+            # Wait for service to be available
+            # if not self._component_status_querier.wait_for_service(timeout=10.0):
+            #     raise RuntimeError("Component status service not available")
 
-            status_dict = {}
-            if response:
-                # Parse protobuf response directly
-                status_msg = cast(
-                    control_query_pb2.ComponentStates,
-                    control_query_pb2.ComponentStates.FromString(response),
-                )
-                status_dict = status_to_dict(status_msg)
+            response = self._component_status_querier.call(None)
 
             if show:
-                show_component_status(status_dict)
-            return status_dict
+                show_component_status(response)
+            return response
         except Exception as e:
             raise RuntimeError(f"Failed to retrieve component status: {e}") from e
 
@@ -364,26 +345,13 @@ class RobotQueryInterface:
             ValueError: If the specified component is invalid.
             RuntimeError: If the reboot operation fails.
         """
-        component_map = {
-            "arm": control_query_pb2.RebootComponent.Component.ARM,
-            "chassis": control_query_pb2.RebootComponent.Component.CHASSIS,
-            "torso": control_query_pb2.RebootComponent.Component.TORSO,
-        }
-
-        if part not in component_map:
-            raise ValueError(f"Invalid component: {part}")
-
         try:
-            query_msg = control_query_pb2.RebootComponent(component=component_map[part])
+            # Wait for service to be available
+            if not self._reboot_querier.wait_for_service(timeout=5.0):
+                raise RuntimeError(f"Reboot service not available for {part}")
 
-            call_service(
-                resolve_key_name(self._configs.reboot_query_name),
-                request=query_msg,
-                timeout=30.0,
-                config=get_zenoh_config_path(),
-                request_serializer=lambda x: x.SerializeToString(),
-                response_deserializer=None,
-            )
+            query_msg = {"component": part}
+            self._reboot_querier.call(query_msg)
             logger.info(f"Rebooting component: {part}")
         except Exception as e:
             raise RuntimeError(f"Failed to reboot component {part}: {e}") from e
@@ -402,26 +370,25 @@ class RobotQueryInterface:
             RuntimeError: If the error clearing operation fails.
         """
         component_map = {
-            "left_arm": control_query_pb2.ClearError.Component.LEFT_ARM,
-            "right_arm": control_query_pb2.ClearError.Component.RIGHT_ARM,
-            "chassis": control_query_pb2.ClearError.Component.CHASSIS,
-            "head": control_query_pb2.ClearError.Component.HEAD,
+            "left_arm": RobotComponentEnum.LEFT_ARM,
+            "right_arm": RobotComponentEnum.RIGHT_ARM,
+            "head": RobotComponentEnum.HEAD,
+            "chassis": RobotComponentEnum.CHASSIS,
+            "left_hand": RobotComponentEnum.LEFT_HAND,
+            "right_hand": RobotComponentEnum.RIGHT_HAND,
         }
 
         if part not in component_map:
             raise ValueError(f"Invalid component: {part}")
 
         try:
-            query_msg = control_query_pb2.ClearError(component=component_map[part])
+            # Wait for service to be available
+            if not self._clear_error_querier.wait_for_service(timeout=5.0):
+                raise RuntimeError(f"Clear error service not available for {part}")
 
-            call_service(
-                resolve_key_name(self._configs.clear_error_query_name),
-                request=query_msg,
-                timeout=2.0,
-                config=get_zenoh_config_path(),
-                request_serializer=lambda x: x.SerializeToString(),
-                response_deserializer=None,
-            )
+            query_msg = {"component": component_map[part]}
+
+            self._clear_error_querier.call(query_msg)
             logger.info(f"Cleared error of {part}")
         except Exception as e:
             raise RuntimeError(
@@ -448,7 +415,7 @@ class RobotQueryInterface:
         table.add_column("Sub Hash", justify="center", style="red")
 
         # Display server components
-        server_info = version_info.get("server", {})
+        server_info = version_info.get("firmware_version", {})
         for component, info in server_info.items():
             if isinstance(info, dict):
                 table.add_row(

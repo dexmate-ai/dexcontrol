@@ -16,47 +16,12 @@ needs using the DexComm library's Raw API.
 
 import json
 import time
-from pathlib import Path
 
-from dexcomm import ZenohConfig, call_service
-from dexcomm.serialization import deserialize_json
+from dexcomm import call_service
+from dexcomm.codecs import JsonDataCodec
 from loguru import logger
 
-import dexcontrol
 from dexcontrol.utils.os_utils import resolve_key_name
-
-
-def get_robot_config() -> ZenohConfig:
-    """Get DexComm configuration for robot communication.
-
-    This checks for the robot's Zenoh configuration file and creates
-    appropriate DexComm config.
-
-    Returns:
-        ZenohConfig instance configured for the robot.
-    """
-    config_path = dexcontrol.COMM_CFG_PATH
-
-    if config_path and config_path != Path("/tmp/no_config") and config_path.exists():
-        logger.debug(f"Loading config from: {config_path}")
-        return ZenohConfig.from_file(config_path)
-    else:
-        logger.debug("No config file found, using default peer mode")
-        return ZenohConfig.default_peer()
-
-
-def get_zenoh_config_path() -> Path | None:
-    """Get robot config only if not using default SessionManager.
-
-    DexComm's SessionManager will automatically use the config from
-    environment variables if available, so we only need to provide
-    config explicitly if we have a specific robot config file.
-
-    Returns:
-        path to the config file
-    """
-    config_path = dexcontrol.COMM_CFG_PATH
-    return config_path
 
 
 def query_json_service(
@@ -85,9 +50,8 @@ def query_json_service(
             data = call_service(
                 resolved_topic,
                 timeout=timeout,
-                config=get_zenoh_config_path(),
-                request_serializer=None,
-                response_deserializer=deserialize_json,
+                request_encoder=None,
+                response_decoder=JsonDataCodec.decode,
             )
 
             if data:

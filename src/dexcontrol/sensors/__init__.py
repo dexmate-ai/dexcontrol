@@ -15,13 +15,13 @@ using Zenoh subscribers for data communication.
 """
 
 # Import camera sensors
-from .camera import RGBCameraSensor, ZedCameraSensor
+from .camera import USBCameraSensor, ZedCameraSensor, ZedXOneCameraSensor
 
 # Import IMU sensors
 from .imu import ChassisIMUSensor, ZedIMUSensor
 
 # Import other sensors
-from .lidar import RPLidarSensor
+from .lidar import Lidar3DSensor, RPLidarSensor
 
 # Import sensor manager
 from .manager import Sensors
@@ -29,15 +29,16 @@ from .ultrasonic import UltrasonicSensor
 
 __all__ = [
     # Camera sensors
-    "RGBCameraSensor",
+    "USBCameraSensor",
     "ZedCameraSensor",
-
+    "ZedXOneCameraSensor",
     # IMU sensors
     "ChassisIMUSensor",
     "ZedIMUSensor",
 
     # Other sensors
     "RPLidarSensor",
+    "Lidar3DSensor",
     "UltrasonicSensor",
 
     # Sensor manager

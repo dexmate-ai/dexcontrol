@@ -10,7 +10,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from dexcomm.utils import RateLimiter
+from dexcomm import RateLimiter
 from loguru import logger
 from scipy.ndimage import gaussian_filter1d
 
@@ -309,7 +309,17 @@ def run_replay_loop(
     """
     # Move to start position
     start_pos = {part: pos[0] for part, pos in trajectory.items()}
-    robot.set_joint_pos(start_pos, wait_time=3.0, exit_on_reach=True)
+    if robot.robot_model == "vega_1u":
+        robot.set_joint_pos(
+            {
+                "left_arm": start_pos["left_arm"],
+                "right_arm": start_pos["right_arm"],
+            },
+            wait_time=3.0,
+            exit_on_reach=True,
+        )
+    else:
+        robot.set_joint_pos(start_pos, wait_time=3.0, exit_on_reach=True)
     is_success = True
     try:
         start_time = time.time()
@@ -317,14 +327,16 @@ def run_replay_loop(
             # Prepare frame data
             frame_pos = {part: pos[i] for part, pos in trajectory.items()}
             if max_goal_diff is not None:
+                # Only get positions for components that exist on the robot
                 current_pos = {
                     part: getattr(robot, part).get_joint_pos()
                     for part in trajectory.keys()
+                    if hasattr(robot, part)
                 }
                 # get the difference between the current position and the frame position
                 diff = {
                     part: frame_pos[part] - current_pos[part]
-                    for part in trajectory.keys()
+                    for part in current_pos.keys()
                 }
                 # enforce goal difference threshold
                 if not check_goal_difference(diff, max_goal_diff):
@@ -334,14 +346,19 @@ def run_replay_loop(
             if velocities:
                 # Try position+velocity control for each part
                 for part, pos in frame_pos.items():
+                    if not hasattr(robot, part):
+                        continue  # Skip components that don't exist on this robot
                     component = getattr(robot, part)
                     if velocities and part in velocities:
                         component.set_joint_pos_vel(pos, velocities[part][i])
                     else:
                         component.set_joint_pos(pos)
             else:
-                # Position-only control
-                robot.set_joint_pos(frame_pos, wait_time=0.0)
+                # Position-only control - filter to only components that exist
+                valid_frame_pos = {
+                    part: pos for part, pos in frame_pos.items() if hasattr(robot, part)
+                }
+                robot.set_joint_pos(valid_frame_pos, wait_time=0.0)
 
             # Progress update every 3 seconds
             if i % int(hz * 3) == 0:
@@ -427,16 +444,18 @@ def replay_trajectory(
         logger.info("Execution cancelled")
         return
 
-    robot.set_joint_pos(
-        {
-            "left_arm": robot.left_arm.get_predefined_pose("folded"),
-            "right_arm": robot.right_arm.get_predefined_pose("folded"),
-            "head": robot.head.get_predefined_pose("home"),
-        },
-        wait_time=5.0,
-        exit_on_reach=True,
-    )
-    robot.torso.go_to_pose("crouch20_medium", wait_time=5.0, exit_on_reach=True)
+    # Build initial pose dict based on available components
+    init_pose = {
+        "left_arm": robot.left_arm.get_predefined_pose("folded"),
+        "right_arm": robot.right_arm.get_predefined_pose("folded"),
+    }
+    if hasattr(robot, "head"):
+        init_pose["head"] = robot.head.get_predefined_pose("home")
+
+    robot.set_joint_pos(init_pose, wait_time=5.0, exit_on_reach=True)
+
+    if hasattr(robot, "torso"):
+        robot.torso.go_to_pose("crouch20_medium", wait_time=5.0, exit_on_reach=True)
 
     if robot.have_hand("left"):
         robot.left_hand.close_hand()
@@ -509,7 +528,7 @@ def main():
     if input("Continue? [y/N]: ").lower() != "y":
         return
 
-    if args.file.name == "vega-1_dance.npz" or args.file.name == "vega-rc2_dance.npz":
+    if args.file.name == "vega-1_dance.npz":
         speed = np.clip(args.speed, 0.2, 3.0)
         if speed != args.speed:
             logger.warning(f"Speed factor clamped to {speed} (valid range: 0.2-3.0)")

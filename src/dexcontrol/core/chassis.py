@@ -15,13 +15,15 @@ Zenoh communication. It handles steering and wheel velocity control.
 """
 
 import time
+from typing import cast
 
 import numpy as np
-from dexcomm.serialization.protobuf import control_msg_pb2
-from dexcomm.utils import RateLimiter
+from dexbot_utils import RobotInfo
+from dexbot_utils.configs.components.vega_1 import Vega1ChassisConfig
+from dexcomm import RateLimiter
+from dexcomm.codecs import JointCmdCodec, JointStateCodec
 from jaxtyping import Float
 
-from dexcontrol.config.core import ChassisConfig
 from dexcontrol.core.component import RobotJointComponent
 
 
@@ -34,19 +36,27 @@ class ChassisSteer(RobotJointComponent):
 
     def __init__(
         self,
-        configs: ChassisConfig,
+        name: str,
+        robot_info: RobotInfo,
+        configs: Vega1ChassisConfig,
     ) -> None:
         """Initialize the hand controller.
 
         Args:
+            name: Name of the chassis steer component Node.
             configs: Hand configuration parameters containing communication topics
                 and predefined hand positions.
         """
+        steer_joint_names = robot_info.get_component_parameter(
+            "chassis", "steer_joints"
+        )
         super().__init__(
+            name=name,
             state_sub_topic=configs.steer_state_sub_topic,
             control_pub_topic=configs.steer_control_pub_topic,
-            state_message_type=control_msg_pb2.MotorStateWithCurrent,
-            joint_name=configs.steer_joint_name,
+            control_encoder=JointCmdCodec.encode,
+            state_decoder=JointStateCodec.decode,
+            joint_name=steer_joint_names,
         )
 
     def _send_position_command(
@@ -57,10 +67,9 @@ class ChassisSteer(RobotJointComponent):
         Args:
             joint_pos: Joint positions as list or numpy array.
         """
-        control_msg = control_msg_pb2.MotorPosVelCommand()
         joint_pos_array = self._convert_joint_cmd_to_array(joint_pos)
-        control_msg.pos.extend(joint_pos_array.tolist())
-        self._publish_control(control_msg)
+        data = dict(pos=joint_pos_array)
+        self._publish_control(control_msg=data)
 
 
 class ChassisDrive(RobotJointComponent):
@@ -72,18 +81,26 @@ class ChassisDrive(RobotJointComponent):
 
     def __init__(
         self,
-        configs: ChassisConfig,
+        name: str,
+        robot_info: RobotInfo,
+        configs: Vega1ChassisConfig,
     ) -> None:
         """Initialize the base controller.
 
         Args:
+            name: Name of the chassis component Node.
             configs: Base configuration parameters containing communication topics.
         """
+        drive_joint_names = robot_info.get_component_parameter(
+            "chassis", "drive_joints"
+        )
         super().__init__(
+            name=name,
             state_sub_topic=configs.drive_state_sub_topic,
             control_pub_topic=configs.drive_control_pub_topic,
-            state_message_type=control_msg_pb2.MotorStateWithCurrent,
-            joint_name=configs.drive_joint_name,
+            control_encoder=JointCmdCodec.encode,
+            state_decoder=JointStateCodec.decode,
+            joint_name=drive_joint_names,
         )
 
     def _send_position_command(
@@ -94,10 +111,9 @@ class ChassisDrive(RobotJointComponent):
     def _send_velocity_command(
         self, joint_vel: Float[np.ndarray, " 2"] | list[float]
     ) -> None:
-        control_msg = control_msg_pb2.MotorVelCommand()
         joint_vel_array = self._convert_joint_cmd_to_array(joint_vel)
-        control_msg.vel.extend(joint_vel_array.tolist())
-        self._publish_control(control_msg)
+        data = dict(vel=joint_vel_array)
+        self._publish_control(control_msg=data)
 
 
 class Chassis:
@@ -118,19 +134,32 @@ class Chassis:
 
     def __init__(
         self,
-        configs: ChassisConfig,
+        name: str,
+        robot_info: RobotInfo,
     ) -> None:
         """Initialize the base controller.
 
         Args:
+            name: Name of the chassis component Node.
             configs: Base configuration parameters containing communication topics.
         """
-        self.chassis_steer = ChassisSteer(configs)
-        self.chassis_drive = ChassisDrive(configs)
+        config = robot_info.get_component_config(name)
+        config = cast(Vega1ChassisConfig, config)
+        self.chassis_steer = ChassisSteer(f"{name}_steer", robot_info, config)
+        self.chassis_drive = ChassisDrive(f"{name}_drive", robot_info, config)
 
-        self.max_vel = configs.max_vel
-        self._center_to_wheel_axis_dist = configs.center_to_wheel_axis_dist
-        self._wheels_dist = configs.wheels_dist
+        self.max_lin_vel = robot_info.get_component_parameter(
+            "chassis", "max_linear_vel"
+        )
+        self.max_vel = self.max_lin_vel
+        self._center_to_wheel_axis_dist = robot_info.get_component_parameter(
+            "chassis", "center_to_wheel_axis_dist"
+        )
+
+        self._wheels_dist = robot_info.get_component_parameter("chassis", "wheels_dist")
+        self._max_steering_angle = robot_info.get_component_parameter(
+            "chassis", "max_steering_angle"
+        )
         self._half_wheels_dist = self._wheels_dist / 2
 
         # Pre-compute geometry constants for efficiency
@@ -149,12 +178,10 @@ class Chassis:
                 self._center_to_wheel_axis_dist / self._center_to_wheel_dist,
             ]
         )
+        self.max_ang_vel = self.max_lin_vel / self._center_to_wheel_dist
 
         # Constants for steering angle constraints
-        self._max_steering_angle = np.deg2rad(135)
         self._min_velocity_threshold = 1e-6
-        self.max_lin_vel = self.max_vel
-        self.max_ang_vel = self.max_vel / self._center_to_wheel_dist
 
     def stop(self) -> None:
         """Stop the base by setting all wheel velocities and steering to zero."""
@@ -501,7 +528,7 @@ class Chassis:
         wait_kwargs = wait_kwargs or {}
 
         # Ensure wheel velocities are within limits
-        wheel_velocity = np.clip(wheel_velocity, -self.max_vel, self.max_vel)
+        wheel_velocity = np.clip(wheel_velocity, -self.max_lin_vel, self.max_lin_vel)
 
         if wait_time > 0.0:
             self._execute_timed_command(

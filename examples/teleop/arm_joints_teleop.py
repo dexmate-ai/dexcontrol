@@ -17,7 +17,7 @@ using a PlayStation DualSense controller with direct joint-level control.
 import numpy as np
 import tyro
 from base_arm_teleop import BaseArmTeleopNode, BaseIKController
-from dexcomm.utils import RateLimiter
+from dexcomm import RateLimiter
 from loguru import logger
 
 

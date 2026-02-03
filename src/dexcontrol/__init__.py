@@ -32,7 +32,7 @@ from dexcontrol.utils.constants import COMM_CFG_PATH_ENV_VAR
 # Package-level constants
 LIB_PATH: Final[Path] = Path(__file__).resolve().parent
 CFG_PATH: Final[Path] = LIB_PATH / "config"
-MIN_SOC_SOFTWARE_VERSION: int = 298
+MIN_SOC_SOFTWARE_VERSION: int = 360
 
 logger.configure(
     handlers=[
@@ -41,26 +41,36 @@ logger.configure(
 )
 
 
-def get_comm_cfg_path() -> Path | None:
-    default_path = list(
-        Path("~/.dexmate/comm/zenoh/").expanduser().glob("**/zenoh_peer_config.json5")
+def get_comm_cfg_path() -> str | None:
+    """Get Zenoh config path.
+
+    Priority:
+    1. .dzcfg files directly in ~/.dexmate/comm/zenoh/ or subdirectories
+    2. .json5 files in subdirectories of ~/.dexmate/comm/zenoh/
+    """
+    base_dir = Path("~/.dexmate/comm/zenoh/").expanduser()
+
+    # Priority 1: .dzcfg files (any name, directly in dir or subdirectories)
+    dzcfg_files = sorted(base_dir.glob("**/*.dzcfg"))
+    if dzcfg_files:
+        return dzcfg_files[0].as_posix()
+
+    # Priority 2: .json5 files (subdirectories only)
+    json5_files = sorted(base_dir.glob("**/zenoh*config*.json5"))
+    if json5_files:
+        return json5_files[0].as_posix()
+
+    logger.debug(
+        "No Zenoh config found in ~/.dexmate/comm/zenoh/ - will use DexComm defaults"
     )
-    if len(default_path) == 0:
-        logger.debug(
-            "No zenoh_peer_config.json5 file found in ~/.dexmate/comm/zenoh/ - will use DexComm defaults"
-        )
-        return None
-    return default_path[0]
+    return None
 
 
-# Try to get comm config path, but allow None
-_comm_cfg = os.getenv(COMM_CFG_PATH_ENV_VAR)
-if _comm_cfg:
-    COMM_CFG_PATH: Final[Path] = Path(_comm_cfg).expanduser()
-else:
-    _default = get_comm_cfg_path()
-    COMM_CFG_PATH: Final[Path] = _default if _default else Path("/tmp/no_config")
+if os.getenv(COMM_CFG_PATH_ENV_VAR) is None:
+    comm_cfg_path = get_comm_cfg_path()
+    if comm_cfg_path is not None:
+        os.environ[COMM_CFG_PATH_ENV_VAR] = comm_cfg_path
 
 ROBOT_CFG_PATH: Final[Path] = CFG_PATH
 
-__all__ = ["Robot", "LIB_PATH", "CFG_PATH", "COMM_CFG_PATH", "ROBOT_CFG_PATH"]
+__all__ = ["Robot", "LIB_PATH", "CFG_PATH", "ROBOT_CFG_PATH"]

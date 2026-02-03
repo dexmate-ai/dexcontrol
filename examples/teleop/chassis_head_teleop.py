@@ -19,7 +19,7 @@ import time
 
 import numpy as np
 import tyro
-from dexcomm.utils import RateLimiter
+from dexcomm import RateLimiter
 from loguru import logger
 
 from dexcontrol.apps.dualsense_teleop_base import DualSenseTeleopBase
@@ -65,6 +65,10 @@ class ChassisVelocityTeleopNode(DualSenseTeleopBase):
             device_index: Index of the DualSense controller device.
         """
         super().__init__(control_hz, button_update_hz, device_index)
+
+        if self.bot.robot_model == "vega_1u":
+            logger.error("Invalid operation: Vega 1U does not have a chassis")
+            return
 
         # Motion control parameters
         self._max_linear_velocity = (

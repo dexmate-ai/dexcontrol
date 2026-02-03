@@ -13,8 +13,6 @@
 from enum import Enum
 from typing import Any, Literal
 
-from dexcomm.serialization.protobuf import control_query_pb2
-
 TYPE_SOFTWARE_VERSION = dict[
     Literal["hardware_version", "software_version", "main_hash", "compile_time"], Any
 ]
@@ -28,7 +26,7 @@ class ComponentStatus(Enum):
     ERROR = 2
 
 
-def status_to_enum(status: control_query_pb2.ComponentStatus) -> ComponentStatus:
+def status_to_enum(status: int) -> ComponentStatus:
     """Convert a ComponentStatus protobuf message to a ComponentStatus enum.
 
     Args:
@@ -41,9 +39,9 @@ def status_to_enum(status: control_query_pb2.ComponentStatus) -> ComponentStatus
         ValueError: If the status value is not recognized.
     """
     status_map = {
-        control_query_pb2.ComponentStatus.NORMAL: ComponentStatus.NORMAL,
-        control_query_pb2.ComponentStatus.NA: ComponentStatus.NA,
-        control_query_pb2.ComponentStatus.ERROR: ComponentStatus.ERROR,
+        0: ComponentStatus.NORMAL,
+        1: ComponentStatus.NA,
+        2: ComponentStatus.ERROR,
     }
 
     if status not in status_map:
@@ -53,24 +51,24 @@ def status_to_enum(status: control_query_pb2.ComponentStatus) -> ComponentStatus
 
 
 def status_to_dict(
-    status_msg: control_query_pb2.ComponentStates,
+    status_msg: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """Convert a ComponentStates protobuf message to a dictionary.
+    """Convert a ComponentStates dictionary to a dictionary.
 
     Args:
-        status_msg: ComponentStates protobuf message.
+        status_msg: ComponentStates dictionary.
 
     Returns:
         Dictionary containing status information for each component.
     """
     return {
         name: {
-            "connected": state.connected,
-            "enabled": status_to_enum(state.enabled),
-            "error_state": status_to_enum(state.error_state),
-            "error_code": state.error_code,
+            "connected": state["connection"],
+            "enabled": status_to_enum(state["enabled"]),
+            "error_state": status_to_enum(state["error_state"]),
+            "error_code": state["error"],
         }
-        for name, state in status_msg.states.items()
+        for name, state in status_msg["states"].items()
     }
 
 

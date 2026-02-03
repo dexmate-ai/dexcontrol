@@ -10,9 +10,10 @@
 
 """ZED IMU sensor implementation using Zenoh subscriber."""
 
-import numpy as np
 
-from dexcontrol.comm import create_imu_subscriber
+import numpy as np
+from dexcomm import Node
+from dexcomm.codecs import IMUDataCodec
 
 
 class ZedIMUSensor:
@@ -26,6 +27,7 @@ class ZedIMUSensor:
 
     def __init__(
         self,
+        name,
         configs,
     ) -> None:
         """Initialize the ZED IMU sensor.
@@ -33,10 +35,12 @@ class ZedIMUSensor:
         Args:
             configs: Configuration object containing topic, name, and other settings.
         """
-        self._name = configs.name
+        self._name = name
+        self._node = Node(name=self._name)
 
-
-        self._subscriber = create_imu_subscriber(
+        self._subscriber = self._node.create_subscriber(
+            callback=None,
+            decoder=IMUDataCodec.decode,
             topic=configs.topic,
         )
 
@@ -50,8 +54,7 @@ class ZedIMUSensor:
         Returns:
             True if receiving data, False otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data is not None
+        return self._subscriber.is_active(0.1)
 
     def wait_for_active(self, timeout: float = 5.0) -> bool:
         """Wait for the ZED IMU sensor to start receiving data.
@@ -62,8 +65,7 @@ class ZedIMUSensor:
         Returns:
             True if sensor becomes active, False if timeout is reached.
         """
-        msg = self._subscriber.wait_for_message(timeout)
-        return msg is not None
+        return self._node.wait_for_active(timeout)
 
     def get_obs(self, obs_keys: list[str] | None = None) -> dict[str, np.ndarray] | None:
         """Get observation data for the ZED IMU sensor.

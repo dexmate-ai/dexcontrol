@@ -27,26 +27,27 @@ import signal
 import sys
 import time
 import weakref
-from typing import TYPE_CHECKING, Any, Final, Literal, cast
+from typing import TYPE_CHECKING, Any, Final, Literal
 
-import hydra.utils
 import numpy as np
-import omegaconf
-from dexcomm import cleanup_session
-from dexcomm.utils import RateLimiter
+from dexbot_utils import HandType, RobotInfo
+from dexbot_utils.cfg_modifier import runtime_override_robot_config
+from dexbot_utils.configs import BaseRobotConfig
+from dexcomm import RateLimiter, cleanup_session
 from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
-import dexcontrol
-from dexcontrol.config.vega import VegaConfig, get_vega_config
 from dexcontrol.core.component import RobotComponent
-from dexcontrol.core.hand import HandType
-from dexcontrol.core.misc import ServerLogSubscriber
+from dexcontrol.core.config import get_component_mapping
 from dexcontrol.core.robot_query_interface import RobotQueryInterface
 from dexcontrol.sensors import Sensors
-from dexcontrol.utils.constants import ROBOT_NAME_ENV_VAR
-from dexcontrol.utils.os_utils import check_version_compatibility, get_robot_model
+from dexcontrol.utils.constants import (
+    COMM_CFG_PATH_ENV_VAR,
+    DISABLE_ESTOP_CHECKING_ENV_VAR,
+    DISABLE_HEARTBEAT_ENV_VAR,
+)
+from dexcontrol.utils.os_utils import check_version_compatibility
 from dexcontrol.utils.trajectory_utils import generate_linear_trajectory
 
 if TYPE_CHECKING:
@@ -135,13 +136,14 @@ class Robot(RobotQueryInterface):
     def __init__(
         self,
         robot_model: str | None = None,
-        configs: VegaConfig | None = None,
+        configs: BaseRobotConfig | None = None,
         auto_shutdown: bool = True,
     ) -> None:
         """Initializes the Robot with the given configuration.
 
         Args:
-            robot_model: Optional robot variant name (e.g., "vega-rc2", "vega-1").
+            robot_model: Optional robot variant name
+                (e.g., "vega_1", "vega_1_f5d6", "vega_1u").
                 If configs is None, this will be used to get the appropriate config.
                 Ignored if configs is provided.
             configs: Configuration parameters for all robot components.
@@ -155,22 +157,15 @@ class Robot(RobotQueryInterface):
         """
         self._components: list[RobotComponent] = []
 
-        if robot_model is None:
-            robot_model = get_robot_model()
-        self._robot_model: Final[str] = robot_model
+        self._robot_info: RobotInfo = RobotInfo(robot_model)
+        self._robot_model = robot_model or self._robot_info.robot_model
+        self._robot_name = self._robot_info.robot_name
 
         # Load configuration
-        self._configs: Final[VegaConfig] = configs or get_vega_config(robot_model)
+        self._configs: Final[BaseRobotConfig] = configs or self._robot_info.config
+        super().__init__(configs=self._configs)
 
-        super().__init__(self._configs)
-
-        self._robot_name: Final[str] = os.getenv(ROBOT_NAME_ENV_VAR, "robot")
-        self._pv_components: list[str] = [
-            "head",
-            "torso",
-        ]
-        # Note: zenoh_session no longer needed as DexComm handles sessions
-        self._log_subscriber = ServerLogSubscriber()
+        self._pv_components: list[str] = self._robot_info.get_pv_components()
         self._hand_types: dict[str, HandType] = {}
 
         # Register for automatic shutdown on signals if enabled
@@ -178,7 +173,7 @@ class Robot(RobotQueryInterface):
             _register_signal_handlers()
             _active_robots.add(self)
 
-        self._print_initialization_info(robot_model)
+        self._print_initialization_info()
 
         # Initialize robot components with safe error handling
         self._safe_initialize_components()
@@ -225,21 +220,35 @@ class Robot(RobotQueryInterface):
                 # During interpreter shutdown, some modules might not be available
                 pass
 
-    def _print_initialization_info(self, robot_model: str | None) -> None:
-        """Print initialization information.
+    def _display_server_log(self, log_data: dict[str, str]) -> None:
+        """Display server log message.
 
         Args:
-            robot_model: The robot model being initialized.
+            log_data: Log data dictionary.
         """
+        # Extract log information with safe defaults
+        timestamp = log_data.get("timestamp", "")
+        message = log_data.get("message", "")
+        source = log_data.get("source", "unknown")
+
+        # Validate critical fields
+        if not message:
+            logger.debug("Received log with empty message")
+            return
+
+        # Log the server message with clear identification
+        logger.info(f"[SERVER_LOG] [{timestamp}] [{source}] {message}")
+
+    def _print_initialization_info(self) -> None:
+        """Print initialization information."""
         console = Console()
         table = Table(show_header=False)
         table.add_column(style="cyan", no_wrap=True)
         table.add_column(style="white")
 
         table.add_row("Robot Name", str(self._robot_name))
-        if robot_model:
-            table.add_row("Robot Model", str(robot_model))
-        table.add_row("Communication Config", str(dexcontrol.COMM_CFG_PATH))
+        table.add_row("Robot Model", str(self._robot_model))
+        table.add_row("Communication Config", os.getenv(COMM_CFG_PATH_ENV_VAR))
 
         console.print(table)
 
@@ -260,13 +269,7 @@ class Robot(RobotQueryInterface):
         ]
 
         for step_name, step_function in initialization_steps:
-            try:
-                step_function()
-            except Exception as e:
-                self.shutdown()
-                raise RuntimeError(
-                    f"Robot initialization failed at {step_name}: {e}"
-                ) from e
+            step_function()
 
     def _initialize_sensors(self) -> None:
         """Initialize sensors and wait for activation."""
@@ -276,79 +279,56 @@ class Robot(RobotQueryInterface):
 
     def _initialize_robot_components(self) -> None:
         """Initialize robot components from configuration."""
-        config_dict = omegaconf.OmegaConf.to_container(self._configs, resolve=True)
-        config_dict = cast(dict[str, Any], config_dict)
+        component_dict = self._configs.components
 
         initialized_components = []
         failed_components = []
-        for component_name, component_config in config_dict.items():
-            if component_name == "sensors":
+        component_mapping = get_component_mapping()
+
+        # Check the hand types of the robot, whether the configs and running hardware are compatible
+        self._hand_types = self.query_hand_type()
+        disable_estop = bool(int(os.getenv(DISABLE_ESTOP_CHECKING_ENV_VAR, 0)))
+        disable_heartbeat = bool(int(os.getenv(DISABLE_HEARTBEAT_ENV_VAR, 0)))
+        runtime_override_robot_config(
+            self._configs,
+            hand_types=self._hand_types,
+            disable_estop_checking=disable_estop,
+            disable_heartbeat=disable_heartbeat,
+        )
+
+        for component_name, component_config in component_dict.items():
+            config_cls = type(component_config)
+            if config_cls not in component_mapping:
+                print(
+                    f"Skipping {component_name} initialization, no known component detected."
+                )
                 continue
 
-            try:
-                # Skip hand initialization if the hand is not present on hardware or unknown
-                if (
-                    component_name in ["left_hand", "right_hand"]
-                    and self._hand_types == {}
-                ):
-                    self._hand_types = self.query_hand_type()
-                if (
-                    component_name in ["left_hand", "right_hand"]
-                    and self._hand_types.get(component_name.split("_")[0])
-                    == HandType.UNKNOWN
-                ):
-                    logger.info(
-                        f"Skipping {component_name} initialization, no known hand detected."
-                    )
-                    continue
+            component_class = component_mapping[config_cls]
 
-                component_config = getattr(self._configs, str(component_name))
-                if (
-                    not hasattr(component_config, "_target_")
-                    or not component_config._target_
-                ):
-                    continue
+            component_instance = component_class(
+                name=component_name,
+                robot_info=self._robot_info,
+            )
 
-                # Create component configuration
-                temp_config = omegaconf.OmegaConf.create(
-                    {
-                        "_target_": component_config._target_,
-                        "configs": {
-                            k: v for k, v in component_config.items() if k != "_target_"
-                        },
-                    }
-                )
-
-                # Handle different hand types
-                if component_name in ["left_hand", "right_hand"]:
-                    hand_type = self._hand_types.get(component_name.split("_")[0])
-                    temp_config["hand_type"] = hand_type
-
-                # Instantiate component with error handling
-                # Note: zenoh_session no longer needed as DexComm handles sessions
-                component_instance = hydra.utils.instantiate(temp_config)
-
-                # Store component instance both as attribute and in tracking dictionaries
-                setattr(self, str(component_name), component_instance)
-                initialized_components.append(component_name)
-
-            except Exception as e:
-                logger.error(f"Failed to initialize component {component_name}: {e}")
-                failed_components.append(component_name)
-                # Continue with other components rather than failing completely
-        # Report initialization summary
+            # Store component instance both as attribute and in tracking dictionaries
+            setattr(self, str(component_name), component_instance)
+            initialized_components.append(component_name)
         if failed_components:
             logger.warning(
                 f"Failed to initialize components: {', '.join(failed_components)}"
             )
 
-        # Raise error only if no critical components were initialized
-        critical_components = ["left_arm", "right_arm", "head", "torso", "chassis"]
+        # Validate that we initialized expected components
+        expected_components = ["left_arm", "right_arm", "head", "torso", "chassis"]
         initialized_critical = [
-            c for c in critical_components if c in initialized_components
+            c for c in expected_components if c in initialized_components
         ]
+
         if not initialized_critical:
             raise RuntimeError("Failed to initialize any critical components")
+
+        logger.info(f"Initialized: {', '.join(initialized_components)}")
 
     def _set_default_state(self) -> None:
         """Set default control modes for robot components.
@@ -376,24 +356,7 @@ class Robot(RobotQueryInterface):
             RuntimeError: If any component fails to activate within the timeout period
                         or if shutdown is triggered during activation.
         """
-        component_names: Final[list[str]] = [
-            "left_arm",
-            "right_arm",
-            "head",
-            "chassis",
-            "torso",
-            "battery",
-            "estop",
-        ]
-
-        # Only add hands to component_names if they were actually initialized
-        if hasattr(self, "left_hand"):
-            component_names.append("left_hand")
-        if hasattr(self, "right_hand"):
-            component_names.append("right_hand")
-
-        if self._configs.heartbeat.enabled:
-            component_names.append("heartbeat")
+        component_names = self._robot_info.get_component_list()
 
         console = Console()
         actives: list[bool] = []
@@ -452,27 +415,37 @@ class Robot(RobotQueryInterface):
         else:
             logger.info("All motor components are active")
 
+    def has_component(self, component: str) -> bool:
+        """Check if the robot has a component.
+
+        Args:
+            component: The component to check.
+
+        Returns:
+            True if the robot has the component, False otherwise.
+        """
+        return self._robot_info.has_component(component)
+
     def get_component_map(self) -> dict[str, Any]:
         """Get the component mapping dictionary.
 
         Returns:
             Dictionary mapping component names to component instances.
-        """
-        component_map = {
-            "left_arm": getattr(self, "left_arm", None),
-            "right_arm": getattr(self, "right_arm", None),
-            "torso": getattr(self, "torso", None),
-            "head": getattr(self, "head", None),
+        """  # Components that can be commanded (excludes battery, estop, heartbeat)
+        controllable_components: Final[list[str]] = [
+            "left_arm",
+            "right_arm",
+            "left_hand",
+            "right_hand",
+            "head",
+            "torso",
+            "chassis",
+        ]
+        return {
+            name: getattr(self, name)
+            for name in controllable_components
+            if self.has_component(name)
         }
-
-        # Only add hands if they were initialized
-        if hasattr(self, "left_hand"):
-            component_map["left_hand"] = self.left_hand
-        if hasattr(self, "right_hand"):
-            component_map["right_hand"] = self.right_hand
-
-        # Remove None values
-        return {k: v for k, v in component_map.items() if v is not None}
 
     def validate_component_names(self, joint_pos: dict[str, Any]) -> None:
         """Validate that all component names are valid and initialized.
@@ -538,7 +511,6 @@ class Robot(RobotQueryInterface):
             version_info = self.get_version_info(show=False)
             check_version_compatibility(version_info)
         except Exception as e:
-            # Log error but don't fail initialization for version check issues
             logger.warning(f"Version compatibility check failed: {e}")
 
     def shutdown(self) -> None:
@@ -555,11 +527,10 @@ class Robot(RobotQueryInterface):
         logger.info("Shutting down robot components...")
         self._shutdown_called = True
 
-        # Remove from active robots registry
         try:
             _active_robots.discard(self)
         except Exception:  # pylint: disable=broad-except
-            pass  # WeakSet may already have removed it
+            pass
 
         # First, stop all components that have stop methods to halt ongoing operations
         for component in self._components:
@@ -595,12 +566,6 @@ class Robot(RobotQueryInterface):
 
         # Brief delay to allow component shutdown to complete
         time.sleep(0.1)
-
-        # Clean up log subscriber before closing zenoh session
-        try:
-            self._log_subscriber.shutdown()
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f"Error shutting down log subscriber: {e}")
 
         # Cleanup DexComm shared session
         try:
@@ -829,16 +794,10 @@ class Robot(RobotQueryInterface):
         Returns:
             Compensated joint positions.
         """
-        # Supported robot models
-        SUPPORTED_MODELS = {"vega-1", "vega-rc2", "vega-rc1"}
-
-        if self.robot_model not in SUPPORTED_MODELS:
-            raise ValueError(
-                f"Unsupported robot model: {self.robot_model}. "
-                f"Supported models: {SUPPORTED_MODELS}"
-            )
-
-        torso_pitch = self.torso.pitch_angle
+        if self.robot_model == "vega_1u":
+            torso_pitch = np.pi / 2
+        else:
+            torso_pitch = self.torso.pitch_angle
 
         # Calculate pitch adjustment based on body part
         if part == "right_arm":

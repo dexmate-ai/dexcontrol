@@ -8,36 +8,82 @@
 # 2. Commercial License
 #    For commercial licensing terms, contact: contact@dexmate.ai
 
-"""Example script demonstrating customized end effector control via RS485 pass-through.
+"""Example script demonstrating customized end-effector control via pass-through.
 
-This script shows how to control a custom end effector (e.g., gripper, tool) by sending
-raw RS485 commands through the robot arm's pass-through mode.
+This script shows how to send raw RS485 messages to a customized end effector
+and receive responses. This is useful for controlling custom end effectors
+that are not natively supported by the robot.
+
+NOTE: This only works when the end effector type is UNKNOWN. If a Hand (F5D6)
+or DexGripper is detected, EE pass-through is disabled.
+
+Example use case: Robotiq gripper activation via Modbus RTU.
 """
+
+import time
+from typing import Literal
+
+import tyro
 
 from dexcontrol.robot import Robot
 
 
-def main():
-    bot = Robot()
-    left_arm = bot.left_arm
-    right_arm = bot.right_arm
+def main(
+    side: Literal["left", "right", "both"] = "left",
+    message_hex: str = "09 10 03 E8 00 03 06 01 00 00 00 00 00 72 E1",
+    wait_response: bool = True,
+    timeout: float = 1.0,
+) -> None:
+    """Send a pass-through message to the customized end effector.
 
-    # Example: RS485 command to send (replace with your actual protocol)
-    # For example, to open the default hand installed on vega robot
-    left_hand_data = bytes.fromhex(
-        "34 10 04 6F 00 06 0C 00 00 00 00 FF FF FF FF FF FF FF FF E7 86"
-    )
-    right_hand_data = bytes.fromhex(
-        "AB 10 04 6F 00 06 0C 00 00 00 00 FF FF FF FF FF FF FF FF 5D 8E"
-    )
+    Args:
+        side: Which arm's end effector to communicate with.
+        message_hex: Hex string of the message to send (space-separated bytes).
+            Default is Robotiq activation command.
+        wait_response: Whether to wait for and display the response.
+        timeout: Maximum time to wait for response in seconds.
+    """
+    with Robot() as bot:
+        # Convert hex string to bytes
+        message = bytes.fromhex(message_hex.replace(" ", ""))
+        print(f"Sending message: {message.hex(' ')}")
 
-    # Send the command via pass-through
-    left_arm.send_ee_pass_through_message(left_hand_data)
-    right_arm.send_ee_pass_through_message(right_hand_data)
+        if side in ("left", "both"):
+            if bot.left_arm.enable_ee_pass_through:
+                print("Sending to left arm EE...")
+                bot.left_arm.send_ee_pass_through_message(message)
 
-    # Optionally, shutdown the robot after use
-    bot.shutdown()
+                if wait_response:
+                    start = time.time()
+                    while time.time() - start < timeout:
+                        response = bot.left_arm.get_ee_pass_through_response()
+                        if response is not None:
+                            print(f"Left arm EE response: {response}")
+                            break
+                        time.sleep(0.01)
+                    else:
+                        print("Left arm: No response received within timeout")
+            else:
+                print("Left arm: EE pass-through not enabled (known EE type detected)")
+
+        if side in ("right", "both"):
+            if bot.right_arm.enable_ee_pass_through:
+                print("Sending to right arm EE...")
+                bot.right_arm.send_ee_pass_through_message(message)
+
+                if wait_response:
+                    start = time.time()
+                    while time.time() - start < timeout:
+                        response = bot.right_arm.get_ee_pass_through_response()
+                        if response is not None:
+                            print(f"Right arm EE response: {response}")
+                            break
+                        time.sleep(0.01)
+                    else:
+                        print("Right arm: No response received within timeout")
+            else:
+                print("Right arm: EE pass-through not enabled (known EE type detected)")
 
 
 if __name__ == "__main__":
-    main()
+    tyro.cli(main)

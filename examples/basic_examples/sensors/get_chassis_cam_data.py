@@ -38,9 +38,10 @@ except ImportError:
 import matplotlib.pyplot as plt
 import numpy as np
 import tyro
+from dexbot_utils.configs.components.sensors.cameras import CameraConfig
 from loguru import logger
 
-from dexcontrol.config.vega import get_vega_config
+from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
 
 
@@ -124,14 +125,14 @@ class LiveCameraDisplay:
         plt.close(self.fig)
 
 
-def main(use_rtc: bool = True, fps: float = 10.0) -> None:
+def main(use_rtc: bool = False, fps: float = 10.0) -> None:
     """Initializes the robot, retrieves chassis camera data, and displays it in real-time.
 
     Args:
-        use_rtc: If True, use WebRTC for camera streams (default: True)
+        use_rtc: If True, use WebRTC for camera streams (default: False)
         fps: Display refresh rate in Hz (default: 10.0)
     """
-    configs = get_vega_config()
+    configs = get_robot_config()
 
     # Define chassis cameras to be used in this example.
     camera_definitions = {
@@ -141,15 +142,24 @@ def main(use_rtc: bool = True, fps: float = 10.0) -> None:
         "base_back_camera": "Back Camera",
     }
 
-    # Enable all defined cameras in the configuration.
-    for camera_name in camera_definitions:
-        if hasattr(configs.sensors, camera_name):
-            camera_config = getattr(configs.sensors, camera_name)
-            camera_config.enable = True
-            camera_config.use_rtc = use_rtc  # Set RTC mode
-            logger.info(f"Enabled '{camera_name}' (RTC: {use_rtc}).")
+    # Add cameras to config if they don't exist
+    for camera_name, display_name in camera_definitions.items():
+        if camera_name not in configs.sensors:
+            logger.info(f"Adding '{camera_name}' to configuration...")
+            transport = "rtc" if use_rtc else "zenoh"
+            configs.sensors[camera_name] = CameraConfig(
+                name=camera_name,
+                enabled=True,
+                transport=transport,
+                topic=f"sensors/{camera_name}/rgb",
+                rtc_channel=f"sensors/{camera_name}/rgb_rtc",
+            )
         else:
-            logger.warning(f"Camera '{camera_name}' not found in configs.")
+            # Enable existing camera
+            configs.sensors[camera_name].enabled = True
+            if use_rtc:
+                configs.sensors[camera_name].transport = "rtc"
+            logger.info(f"Enabled '{camera_name}' (RTC: {use_rtc}).")
 
     if use_rtc:
         logger.info("Using WebRTC mode for camera streams.")

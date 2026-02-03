@@ -45,6 +45,9 @@ def unfold_robot() -> None:
 
     with Robot() as bot:
         # First move torso
+        if bot.robot_model == "vega_1u":
+            logger.error("Invalid operation: Vega 1U does not have a torso")
+            return
         if not bot.torso.is_pose_reached(torso_pose):
             logger.info("Moving torso to operational position")
             bot.set_joint_pos(
@@ -107,6 +110,9 @@ def fold_robot(safe_motion: bool = True) -> None:
     partial_fold_joints: Final[list[int]] = list(range(6))
 
     with Robot() as bot:
+        if bot.robot_model == "vega_1u":
+            logger.error("Invalid operation: Vega 1U does not have hands")
+            return
         # Close hands first
         if bot.have_hand("left"):
             logger.info("Closing hands before folding arms")

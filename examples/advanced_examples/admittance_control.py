@@ -21,7 +21,7 @@ from typing import Literal
 
 import numpy as np
 import tyro
-from dexcomm.utils import RateLimiter
+from dexcomm import RateLimiter
 from dexmotion.ik import LocalPinkIKSolver
 from dexmotion.motion_manager import MotionManager
 from loguru import logger
@@ -173,9 +173,12 @@ def _initialize_robot_and_motion_manager(
     Raises:
         ValueError: If initialization fails.
     """
-    qpos_dict = bot.get_joint_pos_dict(
-        component=["left_arm", "right_arm", "torso", "head"]
-    )
+    if bot.robot_model == "vega_1u":
+        qpos_dict = bot.get_joint_pos_dict(component=["head", "left_arm", "right_arm"])
+    else:
+        qpos_dict = bot.get_joint_pos_dict(
+            component=["head", "torso", "left_arm", "right_arm"]
+        )
 
     motion_manager = MotionManager(
         init_visualizer=False,

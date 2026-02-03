@@ -15,6 +15,7 @@ with an option to compensate for torso pitch. It includes safety prompts
 and proper shutdown procedures.
 """
 
+import numpy as np
 import tyro
 from loguru import logger
 
@@ -75,7 +76,10 @@ def main(comp_pitch: bool = False) -> None:
 
         if comp_pitch:
             # Compensate for torso pitch and move arms
-            torso_pitch = bot.torso.pitch_angle
+            if hasattr(bot, "torso"):
+                torso_pitch = bot.torso.pitch_angle
+            else:
+                torso_pitch = np.pi / 2  # Default for upper body variants
             logger.debug(f"Current torso pitch: {torso_pitch:.4f} rad")
 
             left_arm_target_pose = bot.compensate_torso_pitch(

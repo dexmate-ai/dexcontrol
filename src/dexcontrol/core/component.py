@@ -15,21 +15,17 @@ Raw API for communication. It includes RobotComponent for state-only components
 and RobotJointComponent for components that also support control commands.
 """
 
+import threading
 import time
-from typing import Any, Final, Mapping, TypeVar
+from typing import Any, Callable, Mapping, TypeVar
 
 import numpy as np
-from dexcomm import Publisher, Subscriber
-from dexcomm.serialization import deserialize_protobuf, serialize_protobuf
-from google.protobuf.message import Message
+from dexcomm import Node
 from jaxtyping import Float
 from loguru import logger
 
-from dexcontrol.utils.comm_helper import get_zenoh_config_path
-from dexcontrol.utils.os_utils import resolve_key_name
-
 # Type variable for Message subclasses
-M = TypeVar("M", bound=Message)
+M = TypeVar("M")
 
 
 class RobotComponent:
@@ -47,57 +43,41 @@ class RobotComponent:
 
     def __init__(
         self,
+        name: str,
         state_sub_topic: str,
-        state_message_type: type[M],
+        state_decoder: Callable[[bytes], Any] | None = None,
     ) -> None:
         """Initializes RobotComponent.
 
         Args:
             state_sub_topic: Topic to subscribe to for state updates.
-            state_message_type: Protobuf message class for component state.
+            decoder: Decoder function
         """
-        self._state_message_type = state_message_type
-        self._latest_state: M | None = None
+        super().__init__()
+        self._latest_state: Any | None = None
         self._is_active = False
-        self._init_subscriber(state_sub_topic, state_message_type)
-
-    def _init_subscriber(
-        self,
-        state_sub_topic: str,
-        state_message_type: type[M],
-    ) -> None:
-        """Initialize the subscriber for state updates using DexComm.
-
-        Args:
-            state_sub_topic: Topic to subscribe to for state updates.
-            state_message_type: Protobuf message class for component state.
-        """
-        # Resolve topic with robot namespace
-        full_topic = resolve_key_name(state_sub_topic)
-
-        # Create DexComm subscriber with protobuf deserialization
-        self._subscriber = Subscriber(
-            topic=full_topic,
+        self._node = Node(
+            name=name,
+        )
+        self._lock = threading.Lock()
+        self._subscriber = self._node.create_subscriber(
+            topic=state_sub_topic,
             callback=self._on_state_update,
-            deserializer=lambda data: deserialize_protobuf(data, state_message_type),
-            config=get_zenoh_config_path(),
+            decoder=state_decoder,
         )
 
-        logger.debug(
-            f"Created subscriber for {self.__class__.__name__} on {full_topic}"
-        )
-
-    def _on_state_update(self, state: M) -> None:
+    def _on_state_update(self, state: Any) -> None:
         """Handle incoming state updates.
 
         Args:
-            state: Deserialized protobuf state message.
+            state: Decoded protobuf state message.
         """
-        self._latest_state = state
+        with self._lock:
+            self._latest_state = state
         if state:
             self._is_active = True
 
-    def _get_state(self) -> M:
+    def _get_state(self) -> Any:
         """Gets the current state of the component.
 
         Returns:
@@ -106,9 +86,12 @@ class RobotComponent:
         Raises:
             None: If no state data is available.
         """
-        if self._latest_state is None:
+        with self._lock:
+            state = self._latest_state
+        if state is None:
             logger.error(f"No state data available for {self.__class__.__name__}")
-        return self._latest_state
+            return None
+        return state
 
     def wait_for_active(self, timeout: float = 5.0) -> bool:
         """Waits for the component to start receiving state updates.
@@ -149,8 +132,8 @@ class RobotComponent:
                     )
 
         # Shutdown subscriber to release resources
-        if hasattr(self, "_subscriber") and self._subscriber:
-            self._subscriber.shutdown()
+        if hasattr(self, "_node") and self._node:
+            self._node.shutdown()
 
     def get_timestamp_ns(self) -> int:
         """Get the current timestamp (in nanoseconds) of the most recent state update.
@@ -159,7 +142,7 @@ class RobotComponent:
             The current timestamp in nanoseconds when driver updated the state.
             We convert the time to client clock by adding the server time offset.
         """
-        return self._get_state().timestamp_ns
+        return self._get_state()["timestamp_ns"]
 
 
 class RobotJointComponent(RobotComponent):
@@ -194,12 +177,14 @@ class RobotJointComponent(RobotComponent):
 
     def __init__(
         self,
+        name: str,
         state_sub_topic: str,
         control_pub_topic: str,
-        state_message_type: type[M],
+        control_encoder: Callable[[Any], bytes] | None = None,
+        state_decoder: Callable[[bytes], Any] | None = None,
         joint_name: list[str] | None = None,
-        joint_limit: list[list[float]] | None = None,
-        joint_vel_limit: list[float] | None = None,
+        joint_pos_limit: Float[np.ndarray, " N 2"] | None = None,
+        joint_vel_limit: Float[np.ndarray, " N"] | None = None,
         pose_pool: Mapping[str, list[float] | np.ndarray] | None = None,
     ) -> None:
         """Initializes RobotJointComponent.
@@ -207,44 +192,35 @@ class RobotJointComponent(RobotComponent):
         Args:
             state_sub_topic: Topic to subscribe to for state updates.
             control_pub_topic: Topic to publish control commands.
-            state_message_type: Protobuf message class for component state.
+            control_encoder: Encoder function for control messages
+            state_decoder: Decoder function for state messages
             joint_name: List of joint names for this component.
-            joint_limit: Joint position limits.
+            joint_pos_limit: Joint position limits.
             joint_vel_limit: Joint velocity limits.
             pose_pool: Dictionary of predefined poses for this component.
         """
-        super().__init__(state_sub_topic, state_message_type)
+        super().__init__(name, state_sub_topic, state_decoder)
 
-        # Resolve topic with robot namespace
-        full_topic = resolve_key_name(control_pub_topic)
-
-        # Create DexComm publisher with protobuf serialization
-        self._publisher: Final[Publisher] = Publisher(
-            topic=full_topic,
-            serializer=serialize_protobuf,
-            config=get_zenoh_config_path(),
+        self._publisher = self._node.create_publisher(
+            topic=control_pub_topic,
+            encoder=control_encoder,
         )
 
-        logger.debug(f"Created publisher for {self.__class__.__name__} on {full_topic}")
         self._joint_name: list[str] | None = joint_name
-        self._joint_limit: np.ndarray | None = (
-            np.array(joint_limit) if joint_limit else None
-        )
-        self._joint_vel_limit: np.ndarray | None = (
-            np.array(joint_vel_limit) if joint_vel_limit else None
-        )
+        self._joint_pos_limit = joint_pos_limit
+        self._joint_vel_limit = joint_vel_limit
 
         self._pose_pool: dict[str, np.ndarray] | None = (
             self._convert_pose_pool_to_arrays(pose_pool)
         )
 
-    def _publish_control(self, control_msg: Message) -> None:
+    def _publish_control(self, control_msg: Any) -> None:
         """Publishes a control command message.
 
         Args:
             control_msg: Protobuf control message to publish.
         """
-        # DexComm publisher with protobuf serializer handles this
+        # DexComm publisher with protobuf encoder handles this
         self._publisher.publish(control_msg)
 
     def shutdown(self) -> None:
@@ -273,9 +249,11 @@ class RobotJointComponent(RobotComponent):
         return self._joint_name.copy()
 
     @property
-    def joint_limit(self) -> np.ndarray | None:
+    def joint_pos_limit(self) -> np.ndarray | None:
         """Gets the joint limits of the component."""
-        return self._joint_limit.copy() if self._joint_limit is not None else None
+        return (
+            self._joint_pos_limit.copy() if self._joint_pos_limit is not None else None
+        )
 
     @property
     def joint_vel_limit(self) -> np.ndarray | None:
@@ -334,9 +312,9 @@ class RobotJointComponent(RobotComponent):
             ValueError: If joint positions are not available for this component.
         """
         state = self._get_state()
-        if not hasattr(state, "pos"):
+        if "pos" not in state:
             raise ValueError("Joint positions are not available for this component.")
-        joint_pos = np.array(state.pos, dtype=np.float32)
+        joint_pos = np.array(state["pos"], dtype=np.float32)
         return self._extract_joint_info(joint_pos, joint_id=joint_id)
 
     def get_joint_pos_dict(
@@ -372,9 +350,9 @@ class RobotJointComponent(RobotComponent):
             ValueError: If joint velocities are not available for this component.
         """
         state = self._get_state()
-        if not hasattr(state, "vel"):
+        if "vel" not in state:
             raise ValueError("Joint velocities are not available for this component.")
-        joint_vel = np.array(state.vel, dtype=np.float32)
+        joint_vel = np.array(state["vel"], dtype=np.float32)
         return self._extract_joint_info(joint_vel, joint_id=joint_id)
 
     def get_joint_vel_dict(
@@ -409,9 +387,9 @@ class RobotJointComponent(RobotComponent):
             ValueError: If joint currents are not available for this component.
         """
         state = self._get_state()
-        if not hasattr(state, "cur"):
+        if "cur" not in state:
             raise ValueError("Joint currents are not available for this component.")
-        joint_cur = np.array(state.cur, dtype=np.float32)
+        joint_cur = np.array(state["cur"], dtype=np.float32)
         return self._extract_joint_info(joint_cur, joint_id=joint_id)
 
     def get_joint_torque(
@@ -429,9 +407,9 @@ class RobotJointComponent(RobotComponent):
             ValueError: If joint torques are not available for this component.
         """
         state = self._get_state()
-        if not hasattr(state, "torque"):
+        if "torque" not in state:
             raise ValueError("Joint torques are not available for this component.")
-        joint_torque = np.array(state.torque, dtype=np.float32)
+        joint_torque = np.array(state["torque"], dtype=np.float32)
         return self._extract_joint_info(joint_torque, joint_id=joint_id)
 
     def get_joint_current_dict(
@@ -464,9 +442,9 @@ class RobotJointComponent(RobotComponent):
             ValueError: If joint error codes are not available for this component.
         """
         state = self._get_state()
-        if not hasattr(state, "error"):
+        if "error" not in state:
             raise ValueError("Joint error codes are not available for this component.")
-        joint_err = np.array(state.error, dtype=np.uint32)
+        joint_err = np.array(state["error"], dtype=np.uint32)
         return self._extract_joint_info(joint_err, joint_id=joint_id)
 
     def get_joint_err_dict(
@@ -500,22 +478,22 @@ class RobotJointComponent(RobotComponent):
             ValueError: If joint positions or velocities are not available.
         """
         state = self._get_state()
-        if not hasattr(state, "pos") or not hasattr(state, "vel"):
+        if "pos" not in state or "vel" not in state:
             raise ValueError(
                 "Joint positions or velocities are not available for this component."
             )
 
         # Create initial state array with positions and velocities
-        joint_pos = np.array(state.pos, dtype=np.float32)
-        joint_vel = np.array(state.vel, dtype=np.float32)
+        joint_pos = np.array(state["pos"], dtype=np.float32)
+        joint_vel = np.array(state["vel"], dtype=np.float32)
 
-        if hasattr(state, "cur"):
+        if "cur" in state:
             # If currents are available, include them
-            joint_cur = np.array(state.cur, dtype=np.float32)
+            joint_cur = np.array(state["cur"], dtype=np.float32)
             joint_state = np.stack([joint_pos, joint_vel, joint_cur], axis=1)
-        elif hasattr(state, "torque"):
+        elif "torque" in state:
             # If torques are available, include them
-            joint_torque = np.array(state.torque, dtype=np.float32)
+            joint_torque = np.array(state["torque"], dtype=np.float32)
             joint_state = np.stack([joint_pos, joint_vel, joint_torque], axis=1)
         else:
             raise ValueError(
@@ -741,9 +719,9 @@ class RobotJointComponent(RobotComponent):
         if isinstance(joint_pos, (list, dict)):
             joint_pos = self._convert_joint_cmd_to_array(joint_pos)
 
-        if self._joint_limit is not None:
+        if self._joint_pos_limit is not None:
             joint_pos = np.clip(
-                joint_pos, self._joint_limit[:, 0], self._joint_limit[:, 1]
+                joint_pos, self._joint_pos_limit[:, 0], self._joint_pos_limit[:, 1]
             )
 
         self._send_position_command(joint_pos)

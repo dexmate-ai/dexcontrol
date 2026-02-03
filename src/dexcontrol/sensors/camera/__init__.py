@@ -8,16 +8,65 @@
 # 2. Commercial License
 #    For commercial licensing terms, contact: contact@dexmate.ai
 
-"""Camera sensor implementations using Zenoh subscribers.
+"""Production-ready camera sensors with Zenoh and RTC transport support.
 
-This module provides camera sensor classes that use the specialized camera
-subscribers for RGB and RGBD camera data, matching the dexsensor structure.
+This module provides high-performance camera sensor implementations that
+receive data from dexsensor using either Zenoh (JPEG/PNG compressed, reliable)
+or RTC (real-time video, hardware accelerated) transports.
+
+Key Features:
+    - Zenoh transport: Uses dexcomm Node API with automatic codec decoding
+    - RTC transport: Uses dexcomm VideoSubscriber with FFmpeg hardware acceleration
+    - Thread-safe operations with zero-copy data access where possible
+    - Production-grade error handling and logging
+    - Google-style docstrings with comprehensive examples
+
+Available Classes:
+    - USBCameraSensor: Single RGB stream camera
+    - ZedCameraSensor: Multi-stream camera (left_rgb, right_rgb, depth)
+    - BaseCameraSensor: Abstract base class for custom cameras
+    - TransportType: Enum for transport types (ZENOH, RTC)
+    - StreamType: Enum for stream data types (RGB, DEPTH)
+
+Example:
+    ```python
+    from dexcontrol.sensors.camera import USBCameraSensor
+
+    camera = USBCameraSensor(
+        name="camera_front",
+        stream_config={
+            "enable": True,
+            "transport": "rtc",
+            "rtc_channel": "sensors/camera_front/rgb_rtc",
+            "codec": "h264"
+            # width/height optional - VideoSubscriber auto-queries from publisher
+        }
+    )
+
+    # Get latest frame
+    frame = camera.get_rgb()  # np.ndarray (1080, 1920, 3) uint8
+    ```
 """
 
-from .rgb_camera import RGBCameraSensor
-from .zed_camera import ZedCameraSensor
+from dexcontrol.sensors.camera.base_camera import (
+    BaseCameraSensor,
+    StreamType,
+    TransportType,
+)
+from dexcontrol.sensors.camera.usb_camera import USBCameraSensor
+from dexcontrol.sensors.camera.zed_camera import ZedCameraSensor, ZedXOneCameraSensor
+
+# Backward compatibility alias
+RGBCameraSensor = USBCameraSensor
 
 __all__ = [
-    "RGBCameraSensor",
+    # Sensor classes
+    "USBCameraSensor",
     "ZedCameraSensor",
+    "ZedXOneCameraSensor",
+    "RGBCameraSensor",  # Backward compatibility
+    # Base classes and types
+    "BaseCameraSensor",
+    "TransportType",
+    "StreamType",
 ]
