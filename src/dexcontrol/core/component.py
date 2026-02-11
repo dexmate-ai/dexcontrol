@@ -15,7 +15,6 @@ Raw API for communication. It includes RobotComponent for state-only components
 and RobotJointComponent for components that also support control commands.
 """
 
-import threading
 import time
 from typing import Any, Callable, Mapping, TypeVar
 
@@ -35,10 +34,13 @@ class RobotComponent:
     Zenoh communication. It subscribes to state updates and provides methods to
     access the latest state data.
 
+    Uses dexcomm's Rust-side storage for zero GIL contention - the background thread
+    stores raw bytes without acquiring the GIL, and get_latest() decodes on-demand
+    with smart caching (<1μs cache hit, ~10μs cache miss).
+
     Attributes:
-        _state_message_type: Protobuf message class for component state.
-        _zenoh_session: Active Zenoh session for communication.
-        _subscriber: Zenoh subscriber for state updates.
+        _node: DexComm node for communication management.
+        _subscriber: DexComm subscriber with Rust-side state storage.
     """
 
     def __init__(
@@ -50,47 +52,32 @@ class RobotComponent:
         """Initializes RobotComponent.
 
         Args:
+            name: Name of the component node.
             state_sub_topic: Topic to subscribe to for state updates.
-            decoder: Decoder function
+            state_decoder: Decoder function for state messages.
         """
         super().__init__()
-        self._latest_state: Any | None = None
-        self._is_active = False
         self._node = Node(
             name=name,
         )
-        self._lock = threading.Lock()
+        # No callback - use Rust-side storage for zero GIL contention
         self._subscriber = self._node.create_subscriber(
             topic=state_sub_topic,
-            callback=self._on_state_update,
             decoder=state_decoder,
         )
-
-    def _on_state_update(self, state: Any) -> None:
-        """Handle incoming state updates.
-
-        Args:
-            state: Decoded protobuf state message.
-        """
-        with self._lock:
-            self._latest_state = state
-        if state:
-            self._is_active = True
 
     def _get_state(self) -> Any:
         """Gets the current state of the component.
 
         Returns:
-            Parsed protobuf state message.
+            Parsed state message from Rust-side storage with smart caching.
 
         Raises:
-            None: If no state data is available.
+            RuntimeError: If no state data has been received yet.
         """
-        with self._lock:
-            state = self._latest_state
+        state = self._subscriber.get_latest()
         if state is None:
-            logger.error(f"No state data available for {self.__class__.__name__}")
-            return None
+            raise RuntimeError(f"No state data available for {self.__class__.__name__}")
         return state
 
     def wait_for_active(self, timeout: float = 5.0) -> bool:
@@ -104,7 +91,7 @@ class RobotComponent:
         """
         start_time = time.time()
         while time.time() - start_time < timeout:
-            if self._is_active:
+            if self.is_active():
                 return True
             time.sleep(0.1)
         return False
@@ -115,7 +102,7 @@ class RobotComponent:
         Returns:
             True if component is active, False otherwise.
         """
-        return self._is_active
+        return self._subscriber.is_active
 
     def shutdown(self) -> None:
         """Cleans up Zenoh resources."""
@@ -141,6 +128,9 @@ class RobotComponent:
         Returns:
             The current timestamp in nanoseconds when driver updated the state.
             We convert the time to client clock by adding the server time offset.
+
+        Raises:
+            RuntimeError: If no state data is available.
         """
         return self._get_state()["timestamp_ns"]
 

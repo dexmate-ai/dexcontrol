@@ -26,6 +26,12 @@ from rich.logging import RichHandler
 
 # DO NOT REMOVE this following import, it is needed for hydra to find the config
 import dexcontrol.config  # pylint: disable=unused-import
+from dexcontrol.exceptions import (
+    ConfigurationError,
+    DexcontrolError,
+    RobotConnectionError,
+    ServiceUnavailableError,
+)
 from dexcontrol.robot import Robot
 from dexcontrol.utils.constants import COMM_CFG_PATH_ENV_VAR
 
@@ -73,4 +79,14 @@ if os.getenv(COMM_CFG_PATH_ENV_VAR) is None:
 
 ROBOT_CFG_PATH: Final[Path] = CFG_PATH
 
-__all__ = ["Robot", "LIB_PATH", "CFG_PATH", "ROBOT_CFG_PATH"]
+__all__ = [
+    "Robot",
+    "LIB_PATH",
+    "CFG_PATH",
+    "ROBOT_CFG_PATH",
+    # Exceptions
+    "DexcontrolError",
+    "ConfigurationError",
+    "RobotConnectionError",
+    "ServiceUnavailableError",
+]

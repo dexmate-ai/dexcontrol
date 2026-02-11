@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-02-10
+
+### Performance Improvements
+
+- **Significantly reduced GIL contention for real-time control loops.** Robot component state updates now happen entirely in Rust without acquiring the Python GIL. Previously, every incoming state message triggered a Python callback that acquired the GIL — this caused latency spikes when running CPU-intensive workloads like neural network inference alongside control loops. With this change, background threads store raw bytes in Rust, and state is only decoded when you read it (with smart caching: <1μs for repeated reads, ~10μs for new data).
+- **Heartbeat monitoring is now GIL-free.** The heartbeat safety monitor has been moved from a Python background thread to a Rust-backed `HeartbeatMonitor`. Heartbeat subscription, decoding, and timeout detection all run without GIL involvement, so heartbeat monitoring no longer interferes with Python workloads. The GIL is only briefly acquired if a timeout actually fires (to log the critical error before exiting).
+
+### Added
+
+- **Clearer error messages when things go wrong.** Introduced a hierarchy of specific exceptions to replace generic `RuntimeError`:
+  - `ConfigurationError` — raised when `ZENOH_CONFIG` is not set, the config file is missing, or permissions are wrong. The error message tells you exactly what to fix.
+  - `RobotConnectionError` — raised when the robot cannot be reached (not powered on, network issues, Zenoh routing problems).
+  - `ServiceUnavailableError` — raised when a specific robot service (e.g., hand type query, version info) is not responding. This can happen during robot initialization or if a component is disabled.
+  - All exceptions inherit from `DexcontrolError`, so you can catch all dexcontrol errors with a single `except DexcontrolError`.
+
+### Fixed
+
+- **End effector baud rate configuration now works.** The `set_ee_baud_rate` feature was broken because the service client used a hardcoded endpoint name that didn't match the robot's actual service. It now uses the correct service name from the arm configuration.
+
+### Dependencies
+
+- Requires `dexcomm >= 0.4.1` (for Rust-side subscriber storage and `HeartbeatMonitor`).
+- Requires `dexbot-utils >= 0.4.1`.
+
 ## [0.4.0] - 2026-02-02
 
 ### Added

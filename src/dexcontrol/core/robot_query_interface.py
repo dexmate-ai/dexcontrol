@@ -35,6 +35,7 @@ from dexcomm.codecs import (
 )
 from loguru import logger
 
+from dexcontrol.exceptions import RobotConnectionError, ServiceUnavailableError
 from dexcontrol.utils.pb_utils import (
     ComponentStatus,
 )
@@ -152,9 +153,12 @@ class RobotQueryInterface:
         """
         last_error = None
 
-        # Wait for service to be available
-        if not self._hand_querier.wait_for_service(timeout=5.0):
-            raise RuntimeError("Hand type query service not available")
+        # Wait for service to be available - this serves as the connection test
+        if not self._hand_querier.wait_for_service(timeout=10.0):  # type: ignore[attr-defined]
+            raise RobotConnectionError(
+                "Cannot connect to robot (timeout after 10s).\n"
+                "  Check that robot is powered on and network is reachable."
+            )
 
         for _ in range(max_attempts):
             response = self._hand_querier.call(None)
@@ -183,7 +187,7 @@ class RobotQueryInterface:
         error_msg = f"Failed to query hand type after {max_attempts} attempts"
         if last_error:
             error_msg += f": {last_error}"
-        raise RuntimeError(error_msg)
+        raise ServiceUnavailableError(error_msg)
 
     def query_ntp(
         self,
@@ -290,20 +294,25 @@ class RobotQueryInterface:
         Raises:
             RuntimeError: If version information cannot be retrieved.
         """
-        try:
-            # Wait for service to be available
-            if not self._version_querier.wait_for_service(timeout=5.0):
-                raise RuntimeError("Version info service not available")
+        # wait_for_service is implemented in Rust, not in Python type stubs
+        if not self._version_querier.wait_for_service(timeout=5.0):  # type: ignore[attr-defined]
+            raise ServiceUnavailableError("Version info service not responding.\n")
 
+        try:
             version_info = self._version_querier.call(None)
-            if version_info:
-                if show:
-                    self._show_version_info(version_info)
-                return version_info
-            else:
-                raise RuntimeError("No valid version information received from server")
         except Exception as e:
-            raise RuntimeError(f"Failed to retrieve version information: {e}") from e
+            raise ServiceUnavailableError(
+                f"Failed to retrieve version information: {e}"
+            ) from e
+
+        if not version_info:
+            raise ServiceUnavailableError(
+                "No valid version information received from server."
+            )
+
+        if show:
+            self._show_version_info(version_info)
+        return version_info
 
     def get_component_status(
         self, show: bool = True
@@ -317,20 +326,18 @@ class RobotQueryInterface:
             Dictionary containing status information for all components.
 
         Raises:
-            RuntimeError: If status information cannot be retrieved.
+            ServiceUnavailableError: If status information cannot be retrieved.
         """
         try:
-            # Wait for service to be available
-            # if not self._component_status_querier.wait_for_service(timeout=10.0):
-            #     raise RuntimeError("Component status service not available")
-
             response = self._component_status_querier.call(None)
 
             if show:
                 show_component_status(response)
             return response
         except Exception as e:
-            raise RuntimeError(f"Failed to retrieve component status: {e}") from e
+            raise ServiceUnavailableError(
+                f"Failed to retrieve component status: {e}"
+            ) from e
 
     def reboot_component(
         self,
@@ -345,16 +352,21 @@ class RobotQueryInterface:
             ValueError: If the specified component is invalid.
             RuntimeError: If the reboot operation fails.
         """
-        try:
-            # Wait for service to be available
-            if not self._reboot_querier.wait_for_service(timeout=5.0):
-                raise RuntimeError(f"Reboot service not available for {part}")
+        # wait_for_service is implemented in Rust, not in Python type stubs
+        if not self._reboot_querier.wait_for_service(timeout=5.0):  # type: ignore[attr-defined]
+            raise ServiceUnavailableError(
+                f"Reboot service not responding for {part}.\n"
+                "  Robot may be initializing - wait and retry."
+            )
 
+        try:
             query_msg = {"component": part}
             self._reboot_querier.call(query_msg)
             logger.info(f"Rebooting component: {part}")
         except Exception as e:
-            raise RuntimeError(f"Failed to reboot component {part}: {e}") from e
+            raise ServiceUnavailableError(
+                f"Failed to reboot component {part}: {e}"
+            ) from e
 
     def clear_error(
         self,
@@ -381,17 +393,19 @@ class RobotQueryInterface:
         if part not in component_map:
             raise ValueError(f"Invalid component: {part}")
 
+        # wait_for_service is implemented in Rust, not in Python type stubs
+        if not self._clear_error_querier.wait_for_service(timeout=5.0):  # type: ignore[attr-defined]
+            raise ServiceUnavailableError(
+                f"Clear error service not responding for {part}.\n"
+                "  Robot may be initializing - wait and retry."
+            )
+
         try:
-            # Wait for service to be available
-            if not self._clear_error_querier.wait_for_service(timeout=5.0):
-                raise RuntimeError(f"Clear error service not available for {part}")
-
             query_msg = {"component": component_map[part]}
-
             self._clear_error_querier.call(query_msg)
             logger.info(f"Cleared error of {part}")
         except Exception as e:
-            raise RuntimeError(
+            raise ServiceUnavailableError(
                 f"Failed to clear error for component {part}: {e}"
             ) from e
 

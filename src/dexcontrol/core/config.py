@@ -37,6 +37,17 @@ class RobotComponentProtocol(Protocol):
         """
         ...
 
+    def wait_for_active(self, timeout: float = 5.0) -> bool:
+        """Wait for component to become active.
+
+        Args:
+            timeout: Maximum time to wait in seconds.
+
+        Returns:
+            True if component becomes active, False if timeout is reached.
+        """
+        ...
+
 
 def get_robot_config() -> BaseRobotConfig:
     return RobotInfo().config

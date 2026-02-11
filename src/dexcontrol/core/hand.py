@@ -311,7 +311,7 @@ class DexGripper(RobotJointComponent):
 
         # Mode service client for gripper control mode
         self._mode_querier = self._node.create_service_client(
-            service_name=f"mode/gripper/{config.side}",
+            service_name=config.set_mode_query,
             request_encoder=DictDataCodec.encode,
             response_decoder=DictDataCodec.decode,
             timeout=5.0,

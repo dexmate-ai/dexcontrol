@@ -25,9 +25,8 @@ from dexbot_utils.configs.components.vega_1 import (
     EStopConfig,
     HeartbeatConfig,
 )
-from dexcomm import Node
+from dexcomm import HeartbeatMonitor
 from dexcomm.codecs import (
-    BasicDataCodec,
     BMSStateCodec,
     EStopStateCodec,
     SoftwareEstopCodec,
@@ -72,10 +71,18 @@ class Battery(RobotComponent):
 
     def _battery_monitor(self) -> None:
         """Background thread that periodically checks battery level and warns if low."""
+        # Wait for first data to arrive before monitoring to avoid false warnings
+        # Battery topic publishes at low frequency, so allow generous timeout
+        while not self._shutdown_event.is_set():
+            if self._subscriber.get_latest() is not None:
+                break
+            self._shutdown_event.wait(0.5)
+
         while not self._shutdown_event.is_set():
             try:
-                if self.is_active():
-                    battery_level = self.get_status()["percentage"]
+                state = self._subscriber.get_latest()
+                if state is not None:
+                    battery_level = float(state["percentage"])
                     if battery_level < 20:
                         logger.warning(
                             f"Battery level is low ({battery_level:.1f}%). "
@@ -98,7 +105,7 @@ class Battery(RobotComponent):
                 - voltage: Battery voltage
                 - power: Power consumption in Watts
         """
-        state = self._get_state()
+        state = self._subscriber.get_latest()
         if state is None:
             return {
                 "percentage": 0.0,
@@ -117,7 +124,7 @@ class Battery(RobotComponent):
 
     def show(self) -> None:
         """Displays the current battery status as a formatted table with color indicators."""
-        state = self._get_state()
+        state = self._subscriber.get_latest()
 
         table = Table(title="Battery Status")
         table.add_column("Parameter", style="cyan")
@@ -252,15 +259,27 @@ class EStop(RobotComponent):
 
     def _estop_monitor(self) -> None:
         """Background thread that continuously monitors EStop button state."""
+        # Wait for first data to arrive before monitoring
+        while not self._shutdown_event.is_set():
+            if self._subscriber.get_latest() is not None:
+                break
+            self._shutdown_event.wait(0.1)
+
         while not self._shutdown_event.is_set():
             try:
-                if self.is_active() and self.is_button_pressed():
-                    logger.critical(
-                        "E-STOP BUTTON PRESSED! Exiting program immediately."
+                state = self._subscriber.get_latest()
+                if state is not None:
+                    button_pressed = (
+                        state.get("left_base_estop_enabled", False)
+                        or state.get("right_base_estop_enabled", False)
+                        or state.get("torso_estop_enabled", False)
+                        or state.get("remote_estop_enabled", False)
                     )
-                    # Don't call self.shutdown() here as it would try to join the current thread
-                    # os._exit(1) will terminate the entire process immediately
-                    os._exit(1)
+                    if button_pressed:
+                        logger.critical(
+                            "E-STOP BUTTON PRESSED! Exiting program immediately."
+                        )
+                        os._exit(1)
             except Exception as e:
                 logger.debug(f"EStop monitor error: {e}")
 
@@ -295,7 +314,7 @@ class EStop(RobotComponent):
                 - button_pressed: EStop button pressed
                 - software_estop_enabled: Software EStop enabled
         """
-        state = self._get_state()
+        state = self._subscriber.get_latest()
         if state is None:
             return {
                 "button_pressed": False,
@@ -314,7 +333,9 @@ class EStop(RobotComponent):
 
     def is_button_pressed(self) -> bool:
         """Checks if the EStop button is pressed."""
-        state = self._get_state()
+        state = self._subscriber.get_latest()
+        if state is None:
+            return False
         button_pressed = (
             state.get("left_base_estop_enabled", False)
             or state.get("right_base_estop_enabled", False)
@@ -325,7 +346,9 @@ class EStop(RobotComponent):
 
     def is_software_estop_enabled(self) -> bool:
         """Checks if the software EStop is enabled."""
-        state = self._get_state()
+        state = self._subscriber.get_latest()
+        if state is None:
+            return False
         return state["software_estop_enabled"]
 
     def activate(self) -> None:
@@ -379,13 +402,14 @@ class Heartbeat:
     This provides a critical safety mechanism to prevent the robot from operating
     when the low-level controller is not functioning properly.
 
+    The core monitoring runs entirely in Rust (via dexcomm.HeartbeatMonitor),
+    making it immune to Python GIL contention. Even under heavy Python workloads
+    (e.g., neural network inference, control optimization), the heartbeat subscriber
+    and timeout detection operate without GIL involvement.
+
     Attributes:
-        _subscriber: Zenoh subscriber for heartbeat data.
-        _monitor_thread: Background thread for heartbeat monitoring.
-        _shutdown_event: Event to signal thread shutdown.
-        _timeout_seconds: Timeout in seconds before triggering emergency exit.
+        _monitor: Rust-backed HeartbeatMonitor that handles subscription and timeout.
         _enabled: Whether heartbeat monitoring is enabled.
-        _paused: Atomic flag for pause state (no lock needed).
     """
 
     def __init__(
@@ -396,113 +420,41 @@ class Heartbeat:
         """Initialize the Heartbeat monitor.
 
         Args:
-            configs: Heartbeat configuration containing topic and timeout settings.
+            name: Component name.
+            robot_info: RobotInfo instance.
         """
+
         config = robot_info.get_component_config(name)
         config = cast(HeartbeatConfig, config)
-        self._node = Node(name=name)
-        self._timeout_seconds = config.timeout_seconds
         self._enabled = config.enabled
-        self._paused = threading.Event()  # Set when paused (uses atomic ops internally)
-        self._shutdown_event = threading.Event()
 
-        # State tracking (minimal locking needed)
-        # Callback only updates heartbeat value, monitor thread handles timing
-        self._state_lock = threading.Lock()
-        self._latest_heartbeat_ms = None  # Updated by callback
-        self._last_seen_heartbeat_ms = None  # Last value seen by monitor
-        self._last_heartbeat_time = None  # Time monitor last saw new data
-        self._last_warning_time = 0.0
-
-        # Create subscriber with optimized callback (no timing calls!)
-        self._subscriber = self._node.create_subscriber(
-            topic=config.heartbeat_topic,
-            callback=self._on_heartbeat,
-            decoder=BasicDataCodec.decode,
+        # Create Rust-backed heartbeat monitor
+        # All subscription, decoding, and timeout detection happen in Rust threads
+        # with zero GIL involvement. On timeout, it calls os._exit(1) via callback
+        # or exits the process directly from Rust if no callback is provided.
+        self._monitor = HeartbeatMonitor(
+            topic=f"{robot_info.robot_name}/{config.heartbeat_topic}",
+            timeout_seconds=config.timeout_seconds,
+            enabled=config.enabled,
+            on_timeout=self._handle_timeout if config.enabled else None,
         )
 
-        # Start monitoring thread
-        self._monitor_thread = threading.Thread(
-            target=self._heartbeat_monitor, daemon=True
-        )
-        self._monitor_thread.start()
+    def _handle_timeout(self, time_since_last: float, timeout_seconds: float) -> None:
+        """Handle heartbeat timeout - called from Rust when timeout fires.
 
-        if not self._enabled:
-            logger.info(
-                "Heartbeat monitoring is DISABLED - will monitor but not exit on timeout"
-            )
-        else:
-            logger.info(
-                f"Heartbeat monitor started with {self._timeout_seconds}s timeout"
-            )
-
-    def _on_heartbeat(self, data: int) -> None:
-        """Callback for heartbeat updates. Runs in subscriber thread - keep it FAST!
+        This callback is only invoked once when timeout is detected.
+        The GIL is only acquired at this moment, not during normal monitoring.
 
         Args:
-            data: Heartbeat data in milliseconds.
-
-        Note: No time.time() call here! Timing is handled by monitor thread.
-        This reduces GIL hold time by ~50ns per heartbeat.
+            time_since_last: Seconds since last heartbeat.
+            timeout_seconds: Configured timeout value.
         """
-        # Absolute minimum work - just store the value (no timing!)
-        with self._state_lock:
-            self._latest_heartbeat_ms = data
-
-    def _heartbeat_monitor(self) -> None:
-        """Background thread that continuously monitors heartbeat signal."""
-        while not self._shutdown_event.is_set():
-            try:
-                # Early exit if paused (no lock needed - Event is thread-safe)
-                if self._paused.is_set():
-                    self._shutdown_event.wait(0.1)
-                    continue
-
-                # Single lock acquisition for all state operations
-                now = time.time()  # Get current time once
-                with self._state_lock:
-                    current_value = self._latest_heartbeat_ms
-                    last_seen = self._last_seen_heartbeat_ms
-
-                    # Detect new heartbeat data
-                    if current_value is not None and current_value != last_seen:
-                        self._last_seen_heartbeat_ms = current_value
-                        self._last_heartbeat_time = now
-
-                    # Check timeout (use stored timestamp)
-                    last_time = self._last_heartbeat_time
-
-                # Check timeout outside lock
-                if last_time is not None:
-                    time_since_last = now - last_time
-                    if time_since_last > self._timeout_seconds:
-                        self._handle_timeout(time_since_last)
-
-                # Check every 50ms for responsive monitoring
-                self._shutdown_event.wait(0.05)
-
-            except Exception as e:
-                logger.error(f"Heartbeat monitor error: {e}")
-                self._shutdown_event.wait(0.1)
-
-    def _handle_timeout(self, time_since_last: float) -> None:
-        """Handle heartbeat timeout based on enabled state."""
-        if self._enabled:
-            logger.critical(
-                f"HEARTBEAT TIMEOUT! No fresh heartbeat data received for {time_since_last:.2f}s "
-                f"(timeout: {self._timeout_seconds}s). Low-level controller may have failed. "
-                "Exiting program immediately for safety."
-            )
-            os._exit(1)
-        else:
-            # Log warning only once per timeout period to avoid spam
-            now = time.time()
-            if now - self._last_warning_time > self._timeout_seconds:
-                logger.warning(
-                    f"Heartbeat timeout detected ({time_since_last:.2f}s > {self._timeout_seconds}s) "
-                    "but exit is disabled"
-                )
-                self._last_warning_time = now
+        logger.critical(
+            f"HEARTBEAT TIMEOUT! No fresh heartbeat data received for {time_since_last:.2f}s "
+            f"(timeout: {timeout_seconds}s). Low-level controller may have failed. "
+            "Exiting program immediately for safety."
+        )
+        os._exit(1)
 
     def pause(self) -> None:
         """Pause heartbeat monitoring temporarily.
@@ -511,29 +463,11 @@ class Heartbeat:
         the program. This is useful for scenarios where you need to temporarily
         disable safety monitoring (e.g., during system maintenance or testing).
         """
-        if self._paused.is_set():
-            return
-
-        self._paused.set()
-        if self._enabled:
-            logger.warning(
-                "Heartbeat monitoring PAUSED - safety mechanism temporarily disabled"
-            )
-        else:
-            logger.info("Heartbeat monitoring paused (exit already disabled)")
+        self._monitor.pause()
 
     def resume(self) -> None:
         """Resume heartbeat monitoring after being paused."""
-        if not self._paused.is_set():
-            return
-
-        self._paused.clear()
-        self._last_heartbeat_time = time.time()
-
-        if self._enabled:
-            logger.info("Heartbeat monitoring RESUMED - safety mechanism re-enabled")
-        else:
-            logger.info("Heartbeat monitoring resumed (exit still disabled)")
+        self._monitor.resume()
 
     def is_paused(self) -> bool:
         """Check if heartbeat monitoring is currently paused.
@@ -541,7 +475,7 @@ class Heartbeat:
         Returns:
             True if monitoring is paused, False if active or disabled.
         """
-        return self._paused.is_set()
+        return self._monitor.is_paused()
 
     def get_status(self) -> dict[str, bool | float | None]:
         """Gets the current heartbeat status information.
@@ -555,23 +489,17 @@ class Heartbeat:
                 - enabled: Whether heartbeat monitoring is enabled (bool)
                 - paused: Whether heartbeat monitoring is paused (bool)
         """
-        # Single lock acquisition for all state
-        with self._state_lock:
-            last_time = self._last_heartbeat_time
-            last_ms = self._latest_heartbeat_ms
-
-        # Compute derived values outside lock
-        is_active = last_time is not None
-        time_since_last = (time.time() - last_time) if last_time else None
-        last_value = (last_ms / 1000.0) if last_ms else None
+        rust_status = self._monitor.get_status()
+        last_ms = rust_status.get("last_value_ms")
+        last_value = (last_ms / 1000.0) if last_ms is not None else None
 
         return {
-            "is_active": is_active,
+            "is_active": rust_status["is_active"],
             "last_value": last_value,
-            "time_since_last": time_since_last,
-            "timeout_seconds": self._timeout_seconds,
-            "enabled": self._enabled,
-            "paused": self._paused.is_set(),
+            "time_since_last": rust_status["time_since_last"],
+            "timeout_seconds": rust_status["timeout_seconds"],
+            "enabled": rust_status["enabled"],
+            "paused": rust_status["paused"],
         }
 
     def is_active(self) -> bool:
@@ -580,11 +508,33 @@ class Heartbeat:
         Returns:
             True if heartbeat is active, False otherwise.
         """
-        with self._state_lock:
-            return self._last_heartbeat_time is not None
+        return self._monitor.is_active()
+
+    def wait_for_active(self, timeout: float = 5.0) -> bool:
+        """Wait for heartbeat signal to become active.
+
+        If heartbeat monitoring is disabled, returns True immediately since
+        there's nothing to wait for.
+
+        Args:
+            timeout: Maximum time to wait in seconds.
+
+        Returns:
+            True if heartbeat becomes active or is disabled, False if timeout is reached.
+        """
+        # If disabled, nothing to wait for
+        if not self._enabled:
+            return True
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.is_active():
+                return True
+            time.sleep(0.1)
+        return False
 
     @staticmethod
-    def _format_uptime(seconds: float) -> str:
+    def format_uptime(seconds: float) -> str:
         """Convert seconds to human-readable uptime format with high resolution.
 
         Args:
@@ -631,16 +581,7 @@ class Heartbeat:
 
     def shutdown(self) -> None:
         """Shuts down the heartbeat monitor and stops monitoring thread."""
-        self._shutdown_event.set()
-
-        # Join monitor thread (reduced timeout - thread checks every 50ms)
-        if self._monitor_thread.is_alive():
-            self._monitor_thread.join(timeout=0.2)
-            if self._monitor_thread.is_alive():
-                logger.warning("Heartbeat monitor thread did not terminate cleanly")
-
-        # Always shutdown subscriber
-        self._subscriber.shutdown()
+        self._monitor.shutdown()
 
     def show(self) -> None:
         """Displays the current heartbeat status as a formatted table with color indicators."""
@@ -669,7 +610,7 @@ class Heartbeat:
 
         # Server uptime
         if status["last_value"] is not None:
-            uptime_str = self._format_uptime(status["last_value"])
+            uptime_str = self.format_uptime(status["last_value"])
             table.add_row("Server Uptime", f"[blue]{uptime_str}[/]")
 
         # Time since last heartbeat

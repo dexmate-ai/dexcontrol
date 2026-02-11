@@ -680,3 +680,21 @@ class Chassis:
     def is_active(self) -> bool:
         """Check if the chassis is active."""
         return self.chassis_steer.is_active() and self.chassis_drive.is_active()
+
+    def wait_for_active(self, timeout: float = 5.0) -> bool:
+        """Wait for chassis components to receive first state data.
+
+        Args:
+            timeout: Maximum time to wait in seconds.
+
+        Returns:
+            True if both steer and drive receive data, False if timeout is reached.
+        """
+        start_time = time.time()
+        remaining = timeout
+        if not self.chassis_steer.wait_for_active(timeout=remaining):
+            return False
+        remaining = timeout - (time.time() - start_time)
+        if remaining <= 0:
+            return False
+        return self.chassis_drive.wait_for_active(timeout=remaining)

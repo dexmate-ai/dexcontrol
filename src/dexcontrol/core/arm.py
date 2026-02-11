@@ -101,7 +101,7 @@ class Arm(RobotJointComponent):
             )
             # Subscribe to EE pass-through response topic
             self._ee_pass_through_subscriber = self._node.create_subscriber(
-                topic=f"state/ee_pass_through/{config.side}",
+                topic=config.ee_pass_through_state_sub_topic,
                 callback=self._on_ee_pass_through_update,
                 decoder=EEPassThroughCmdCodec.decode,
             )
@@ -115,7 +115,7 @@ class Arm(RobotJointComponent):
 
         # PID configuration service client
         self._pid_querier = self._node.create_service_client(
-            service_name=f"system/arm_pid/{config.side}",
+            service_name=config.pid_query,
             request_encoder=DictDataCodec.encode,
             response_decoder=DictDataCodec.decode,
             timeout=5.0,
@@ -123,7 +123,7 @@ class Arm(RobotJointComponent):
 
         # Brake release service client
         self._brake_querier = self._node.create_service_client(
-            service_name=f"system/arm_brake/{config.side}",
+            service_name=config.brake_query,
             request_encoder=DictDataCodec.encode,
             response_decoder=DictDataCodec.decode,
             timeout=5.0,
@@ -131,7 +131,7 @@ class Arm(RobotJointComponent):
 
         # End-effector baud rate service client
         self._ee_baud_rate_querier = self._node.create_service_client(
-            service_name=f"system/ee_baud_rate/{config.side}",
+            service_name=config.ee_baud_rate_query,
             request_encoder=DictDataCodec.encode,
             response_decoder=DictDataCodec.decode,
             timeout=5.0,

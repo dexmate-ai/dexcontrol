@@ -18,7 +18,9 @@ pip install dexcontrol[example]
 
 ## ⚠️ Version Compatibility
 
-**Important:** `dexcontrol >= 0.3.0` requires robot firmware with SoC version `286` or higher.
+**Important:** `dexcontrol >= 0.4.0` requires robot firmware `>= 0.4.0`. Using older firmware with this version will not work.
+
+> **Note:** `dexcontrol 0.4.x` depends on `dexcomm >= 0.4.0`, which is **not compatible** with `dexcontrol 0.3.x`. If you need to stay on `dexcontrol 0.3.x`, do not upgrade `dexcomm` to `0.4.0` or above.
 
 **Before upgrading, check your current firmware version:**
 ```shell

@@ -27,6 +27,7 @@ import signal
 import sys
 import time
 import weakref
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import numpy as np
@@ -41,6 +42,7 @@ from rich.table import Table
 from dexcontrol.core.component import RobotComponent
 from dexcontrol.core.config import get_component_mapping
 from dexcontrol.core.robot_query_interface import RobotQueryInterface
+from dexcontrol.exceptions import ConfigurationError
 from dexcontrol.sensors import Sensors
 from dexcontrol.utils.constants import (
     COMM_CFG_PATH_ENV_VAR,
@@ -163,6 +165,10 @@ class Robot(RobotQueryInterface):
 
         # Load configuration
         self._configs: Final[BaseRobotConfig] = configs or self._robot_info.config
+
+        # Early validation - fail fast with clear errors
+        self._validate_configuration()
+
         super().__init__(configs=self._configs)
 
         self._pv_components: list[str] = self._robot_info.get_pv_components()
@@ -252,6 +258,48 @@ class Robot(RobotQueryInterface):
 
         console.print(table)
 
+    def _validate_configuration(self) -> None:
+        """Validate configuration before attempting to connect.
+
+        Performs early checks to fail fast with clear error messages:
+        1. Check ZENOH_CONFIG env var exists
+        2. Check config file exists and is readable
+
+        Raises:
+            ConfigurationError: If ZENOH_CONFIG is not set or file doesn't exist.
+        """
+        # Check ZENOH_CONFIG environment variable
+        zenoh_config_path = os.getenv(COMM_CFG_PATH_ENV_VAR)
+        if not zenoh_config_path:
+            raise ConfigurationError(
+                f"{COMM_CFG_PATH_ENV_VAR} environment variable not set.\n"
+                f"  Set it with: export {COMM_CFG_PATH_ENV_VAR}="
+                f"~/.dexmate/comm/zenoh/<robot>/zenoh_peer_config.json5"
+            )
+
+        # Check config file exists and is readable
+        config_path = Path(zenoh_config_path).expanduser()
+        if not config_path.exists():
+            raise ConfigurationError(
+                f"Zenoh config file not found: {config_path}\n"
+                f"  Verify the path exists or update {COMM_CFG_PATH_ENV_VAR}."
+            )
+
+        if not config_path.is_file():
+            raise ConfigurationError(
+                f"Zenoh config path is not a file: {config_path}\n"
+                f"  {COMM_CFG_PATH_ENV_VAR} must point to a valid config file."
+            )
+
+        # Attempt to read the file (permission check)
+        try:
+            config_path.read_text()
+        except PermissionError as e:
+            raise ConfigurationError(
+                f"Cannot read Zenoh config file: {config_path}\n"
+                f"  Check file permissions."
+            ) from e
+
     def _safe_initialize_components(self) -> None:
         """Safely initialize all robot components with consolidated error handling.
 
@@ -282,7 +330,6 @@ class Robot(RobotQueryInterface):
         component_dict = self._configs.components
 
         initialized_components = []
-        failed_components = []
         component_mapping = get_component_mapping()
 
         # Check the hand types of the robot, whether the configs and running hardware are compatible
@@ -296,6 +343,8 @@ class Robot(RobotQueryInterface):
             disable_heartbeat=disable_heartbeat,
         )
 
+        # Phase 1: Create all components (subscribers start receiving data immediately)
+        component_instances: dict[str, Any] = {}
         for component_name, component_config in component_dict.items():
             config_cls = type(component_config)
             if config_cls not in component_mapping:
@@ -305,19 +354,20 @@ class Robot(RobotQueryInterface):
                 continue
 
             component_class = component_mapping[config_cls]
-
-            component_instance = component_class(
+            component_instances[component_name] = component_class(
                 name=component_name,
                 robot_info=self._robot_info,
             )
 
-            # Store component instance both as attribute and in tracking dictionaries
+        # Phase 2: Wait for all components to receive first state update
+        for component_name, component_instance in component_instances.items():
+            if not component_instance.wait_for_active(timeout=5.0):
+                logger.warning(
+                    f"Component {component_name} did not become active within 5s"
+                )
+
             setattr(self, str(component_name), component_instance)
             initialized_components.append(component_name)
-        if failed_components:
-            logger.warning(
-                f"Failed to initialize components: {', '.join(failed_components)}"
-            )
 
         # Validate that we initialized expected components
         expected_components = ["left_arm", "right_arm", "head", "torso", "chassis"]
@@ -361,7 +411,6 @@ class Robot(RobotQueryInterface):
         console = Console()
         actives: list[bool] = []
         timeout_sec: Final[float] = 5.0
-        check_interval: Final[float] = 0.1  # Check every 100ms
 
         status = console.status(
             "[bold green]Waiting for components to become active..."
@@ -376,26 +425,11 @@ class Robot(RobotQueryInterface):
 
                 status.update(f"Waiting for {name} to become active...")
                 if component := getattr(self, name, None):
-                    start_time = time.monotonic()
-                    while True:
-                        if self._shutdown_called:
-                            raise RuntimeError(
-                                "Shutdown triggered during component activation"
-                            )
-
-                        # Try a quick active check first
-                        if component.is_active():
-                            actives.append(True)
-                            self._components.append(component)
-                            break
-
-                        # Check if we've exceeded timeout
-                        if time.monotonic() - start_time >= timeout_sec:
-                            actives.append(False)
-                            break
-
-                        # Wait a short interval before checking again
-                        time.sleep(check_interval)
+                    if component.wait_for_active(timeout=timeout_sec):
+                        actives.append(True)
+                        self._components.append(component)
+                    else:
+                        actives.append(False)
         finally:
             status.stop()
 
