@@ -309,17 +309,11 @@ def run_replay_loop(
     """
     # Move to start position
     start_pos = {part: pos[0] for part, pos in trajectory.items()}
-    if robot.robot_model == "vega_1u":
-        robot.set_joint_pos(
-            {
-                "left_arm": start_pos["left_arm"],
-                "right_arm": start_pos["right_arm"],
-            },
-            wait_time=3.0,
-            exit_on_reach=True,
-        )
-    else:
-        robot.set_joint_pos(start_pos, wait_time=3.0, exit_on_reach=True)
+    # Filter start_pos to only include components available on this robot
+    available_start_pos = {
+        part: pos for part, pos in start_pos.items() if robot.has_component(part)
+    }
+    robot.set_joint_pos(available_start_pos, wait_time=3.0, exit_on_reach=True)
     is_success = True
     try:
         start_time = time.time()
@@ -331,7 +325,7 @@ def run_replay_loop(
                 current_pos = {
                     part: getattr(robot, part).get_joint_pos()
                     for part in trajectory.keys()
-                    if hasattr(robot, part)
+                    if robot.has_component(part)
                 }
                 # get the difference between the current position and the frame position
                 diff = {
@@ -346,7 +340,7 @@ def run_replay_loop(
             if velocities:
                 # Try position+velocity control for each part
                 for part, pos in frame_pos.items():
-                    if not hasattr(robot, part):
+                    if not robot.has_component(part):
                         continue  # Skip components that don't exist on this robot
                     component = getattr(robot, part)
                     if velocities and part in velocities:
@@ -356,7 +350,9 @@ def run_replay_loop(
             else:
                 # Position-only control - filter to only components that exist
                 valid_frame_pos = {
-                    part: pos for part, pos in frame_pos.items() if hasattr(robot, part)
+                    part: pos
+                    for part, pos in frame_pos.items()
+                    if robot.has_component(part)
                 }
                 robot.set_joint_pos(valid_frame_pos, wait_time=0.0)
 
@@ -438,6 +434,9 @@ def replay_trajectory(
         "Please ensure the arms and the torso have sufficient space to move."
     )
     logger.warning(
+        "If you have an end effector attached, some pre-existing trajectories may cause collisions with the robot."
+    )
+    logger.warning(
         "Will move the left arm to folded, the right arm to folded, and the head to home pose, then the torso to crouch20_medium."
     )
     if input("Continue? [y/N]: ").lower() != "y":
@@ -449,12 +448,12 @@ def replay_trajectory(
         "left_arm": robot.left_arm.get_predefined_pose("folded"),
         "right_arm": robot.right_arm.get_predefined_pose("folded"),
     }
-    if hasattr(robot, "head"):
+    if robot.has_component("head"):
         init_pose["head"] = robot.head.get_predefined_pose("home")
 
     robot.set_joint_pos(init_pose, wait_time=5.0, exit_on_reach=True)
 
-    if hasattr(robot, "torso"):
+    if robot.has_component("torso"):
         robot.torso.go_to_pose("crouch20_medium", wait_time=5.0, exit_on_reach=True)
 
     if robot.have_hand("left"):
@@ -499,7 +498,7 @@ def main():
         "--vel-smooth",
         type=float,
         default=0.5,
-        help="Velocity smoothing time window in seconds (default: 0.05s = 50ms)",
+        help="Velocity smoothing time window in seconds (default: 0.5s = 500ms)",
     )
     parser.add_argument(
         "--speed",

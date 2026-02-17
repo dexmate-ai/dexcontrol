@@ -56,18 +56,18 @@ class ArmSafeInitializer:
         self.left_arm, self.right_arm = self._initialize_arms(self.bot)
 
         # Get torso pitch angle if torso exists, otherwise use default
-        if hasattr(self.bot, "torso"):
+        if self.bot.has_component("torso"):
             self.torso_pitch_angle = self.bot.torso.pitch_angle
             # Get initial joint configuration including torso
             components = ["left_arm", "right_arm"]
-            if hasattr(self.bot, "head"):
+            if self.bot.has_component("head"):
                 components.append("head")
             components.append("torso")
             initial_joint_configuration = self.bot.get_joint_pos_dict(components)
         else:
             self.torso_pitch_angle = np.pi / 2  # Default for upper body variants
             components = ["left_arm", "right_arm"]
-            if hasattr(self.bot, "head"):
+            if self.bot.has_component("head"):
                 components.append("head")
             initial_joint_configuration = self.bot.get_joint_pos_dict(components)
 

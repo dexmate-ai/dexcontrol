@@ -35,11 +35,11 @@ def get_pid(side: Literal["left", "right", "both"] = "both") -> None:
     with Robot() as bot:
         if side in ("left", "both"):
             result = bot.left_arm.get_pid()
-            print(f"Left arm PID: {result}")
+            logger.info(f"Left arm PID: {result}")
 
         if side in ("right", "both"):
             result = bot.right_arm.get_pid()
-            print(f"Right arm PID: {result}")
+            logger.info(f"Right arm PID: {result}")
 
 
 def set_pid(

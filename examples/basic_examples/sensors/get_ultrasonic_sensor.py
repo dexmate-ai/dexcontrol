@@ -31,7 +31,7 @@ def main() -> None:
     The ultrasonic sensor returns distance measurements in meters.
     """
     configs = get_robot_config()
-    configs.sensors["ultrasonic"].enabled = True
+    configs.enable_sensor("ultrasonic")
     with Robot(configs=configs) as bot:
         # Get and log ultrasonic sensor reading
         distance = bot.sensors.ultrasonic.get_obs()

@@ -23,6 +23,8 @@ from dexcomm import Node
 from jaxtyping import Float
 from loguru import logger
 
+from dexcontrol.exceptions import ServiceUnavailableError
+
 # Type variable for Message subclasses
 M = TypeVar("M")
 
@@ -73,11 +75,13 @@ class RobotComponent:
             Parsed state message from Rust-side storage with smart caching.
 
         Raises:
-            RuntimeError: If no state data has been received yet.
+            ServiceUnavailableError: If no state data has been received yet.
         """
         state = self._subscriber.get_latest()
         if state is None:
-            raise RuntimeError(f"No state data available for {self.__class__.__name__}")
+            raise ServiceUnavailableError(
+                f"No state data available for {self.__class__.__name__}"
+            )
         return state
 
     def wait_for_active(self, timeout: float = 5.0) -> bool:
@@ -130,7 +134,7 @@ class RobotComponent:
             We convert the time to client clock by adding the server time offset.
 
         Raises:
-            RuntimeError: If no state data is available.
+            ServiceUnavailableError: If no state data is available.
         """
         return self._get_state()["timestamp_ns"]
 

@@ -94,10 +94,10 @@ class USBCameraSensor(BaseCameraSensor):
                 - buffer_size (int): Frame buffer size (default: 1).
 
         Raises:
-            RuntimeError: If stream creation fails.
+            ServiceUnavailableError: If stream creation fails.
         """
         super().__init__(name=name)
-        
+
         # Handle both CameraConfig and configs with stream_config attribute
         if hasattr(configs, "stream_config"):
             stream_config = configs.stream_config
@@ -109,7 +109,7 @@ class USBCameraSensor(BaseCameraSensor):
                 "topic": configs.topic,
                 "rtc_channel": configs.rtc_channel,
             }
-        
+
         # Create RGB stream subscriber
         self._streams["rgb"] = self._create_stream(
             stream_name="rgb",

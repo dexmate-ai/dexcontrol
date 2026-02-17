@@ -83,16 +83,9 @@ def control_joints(
         comp_obj = robot.right_arm
         max_joint_idx = 6  # 7 joints (0-6)
     elif component == "torso":
-        if robot.robot_model == "vega_1u":
-            logger.error("Invalid operation: Vega 1U does not have a torso")
-            return
-        if not hasattr(robot, "torso"):
-            raise ValueError("Torso component not available on this robot variant")
         comp_obj = robot.torso
         max_joint_idx = 2  # 3 joints (0-2)
     elif component == "head":
-        if not hasattr(robot, "head"):
-            raise ValueError("Head component not available on this robot variant")
         comp_obj = robot.head
         comp_obj.set_mode("enable")
         max_joint_idx = 2  # 3 joints (0-2)

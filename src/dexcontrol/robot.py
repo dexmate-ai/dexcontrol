@@ -40,9 +40,14 @@ from rich.console import Console
 from rich.table import Table
 
 from dexcontrol.core.component import RobotComponent
-from dexcontrol.core.config import get_component_mapping
+from dexcontrol.core.config import get_component_config_map
 from dexcontrol.core.robot_query_interface import RobotQueryInterface
-from dexcontrol.exceptions import ConfigurationError
+from dexcontrol.exceptions import (
+    ComponentError,
+    ComponentNotAvailableError,
+    ConfigurationError,
+    DexcontrolError,
+)
 from dexcontrol.sensors import Sensors
 from dexcontrol.utils.constants import (
     COMM_CFG_PATH_ENV_VAR,
@@ -133,7 +138,19 @@ class Robot(RobotQueryInterface):
     estop: EStop
     heartbeat: Heartbeat
     sensors: Sensors
-    _shutdown_called: bool = False
+    _KNOWN_COMPONENTS: Final[set[str]] = {
+        "left_arm",
+        "right_arm",
+        "left_hand",
+        "right_hand",
+        "head",
+        "chassis",
+        "torso",
+        "battery",
+        "estop",
+        "heartbeat",
+        "sensors",
+    }
 
     def __init__(
         self,
@@ -147,24 +164,31 @@ class Robot(RobotQueryInterface):
             robot_model: Optional robot variant name
                 (e.g., "vega_1", "vega_1_f5d6", "vega_1u").
                 If configs is None, this will be used to get the appropriate config.
-                Ignored if configs is provided.
+                If both robot_model and configs are provided, configs takes priority
+                and a warning is logged.
             configs: Configuration parameters for all robot components.
                 If None, will use the configuration specified by robot_model.
             auto_shutdown: Whether to automatically register signal handlers for
                 graceful shutdown on program interruption. Default is True.
 
         Raises:
-            RuntimeError: If any critical component fails to become active within timeout.
+            ComponentError: If any critical component fails to become active within timeout.
             ValueError: If robot_model is invalid or configs cannot be loaded.
         """
+        self._shutdown_called: bool = False
         self._components: list[RobotComponent] = []
 
-        self._robot_info: RobotInfo = RobotInfo(robot_model)
+        if robot_model is not None and configs is not None:
+            logger.warning(
+                "Both 'robot_model' and 'configs' provided. "
+                "'configs' takes priority; 'robot_model' will be ignored."
+            )
+        self._robot_info: RobotInfo = RobotInfo(
+            robot_model if configs is None else None, configs=configs
+        )
         self._robot_model = robot_model or self._robot_info.robot_model
         self._robot_name = self._robot_info.robot_name
-
-        # Load configuration
-        self._configs: Final[BaseRobotConfig] = configs or self._robot_info.config
+        self._configs: Final[BaseRobotConfig] = self._robot_info.config
 
         # Early validation - fail fast with clear errors
         self._validate_configuration()
@@ -307,7 +331,7 @@ class Robot(RobotQueryInterface):
         default modes into a single method with unified error handling.
 
         Raises:
-            RuntimeError: If any critical initialization step fails.
+            ComponentError: If any critical initialization step fails.
         """
         initialization_steps = [
             ("robot components", self._initialize_robot_components),
@@ -330,7 +354,7 @@ class Robot(RobotQueryInterface):
         component_dict = self._configs.components
 
         initialized_components = []
-        component_mapping = get_component_mapping()
+        component_mapping = get_component_config_map()
 
         # Check the hand types of the robot, whether the configs and running hardware are compatible
         self._hand_types = self.query_hand_type()
@@ -346,6 +370,10 @@ class Robot(RobotQueryInterface):
         # Phase 1: Create all components (subscribers start receiving data immediately)
         component_instances: dict[str, Any] = {}
         for component_name, component_config in component_dict.items():
+            if not component_config.enabled:
+                logger.debug(f"Skipping disabled component: {component_name}")
+                continue
+
             config_cls = type(component_config)
             if config_cls not in component_mapping:
                 print(
@@ -376,16 +404,12 @@ class Robot(RobotQueryInterface):
         ]
 
         if not initialized_critical:
-            raise RuntimeError("Failed to initialize any critical components")
+            raise ComponentError("Failed to initialize any critical components")
 
         logger.info(f"Initialized: {', '.join(initialized_components)}")
 
     def _set_default_state(self) -> None:
-        """Set default control modes for robot components.
-
-        Raises:
-            RuntimeError: If setting default mode fails for any component.
-        """
+        """Set default control modes for robot components."""
         for arm in ["left_arm", "right_arm"]:
             if component := getattr(self, arm, None):
                 component.set_modes(["position"] * 7)
@@ -403,7 +427,7 @@ class Robot(RobotQueryInterface):
         and ensures they are properly initialized before proceeding.
 
         Raises:
-            RuntimeError: If any component fails to activate within the timeout period
+            ComponentError: If any component fails to activate within the timeout period
                         or if shutdown is triggered during activation.
         """
         component_names = self._robot_info.get_component_list()
@@ -421,7 +445,9 @@ class Robot(RobotQueryInterface):
             for name in component_names:
                 # Check if shutdown was triggered
                 if self._shutdown_called:
-                    raise RuntimeError("Shutdown triggered during component activation")
+                    raise ComponentError(
+                        "Shutdown triggered during component activation"
+                    )
 
                 status.update(f"Waiting for {name} to become active...")
                 if component := getattr(self, name, None):
@@ -435,7 +461,7 @@ class Robot(RobotQueryInterface):
 
         if not any(actives):
             self.shutdown()
-            raise RuntimeError(f"No components activated within {timeout_sec}s")
+            raise ComponentError(f"No components activated within {timeout_sec}s")
 
         if not all(actives):
             inactive = [
@@ -450,17 +476,61 @@ class Robot(RobotQueryInterface):
             logger.info("All motor components are active")
 
     def has_component(self, component: str) -> bool:
-        """Check if the robot has a component.
+        """Check if the robot has an enabled component.
+
+        A component must both exist in the config and be enabled to return True.
+        Disabled components are not initialized and have no attribute on Robot.
 
         Args:
             component: The component to check.
 
         Returns:
-            True if the robot has the component, False otherwise.
+            True if the robot has the component and it is enabled, False otherwise.
         """
-        return self._robot_info.has_component(component)
+        if not self._robot_info.has_component(component):
+            return False
+        config = self._configs.components.get(component)
+        return config is not None and config.enabled
 
-    def get_component_map(self) -> dict[str, Any]:
+    def has_sensor(self, sensor: str) -> bool:
+        """Check if the robot has an initialized sensor.
+
+        A sensor must be enabled in config and successfully initialized to return True.
+
+        Args:
+            sensor: The sensor name (e.g., "head_imu", "ultrasonic").
+
+        Returns:
+            True if the sensor is initialized and available, False otherwise.
+        """
+        return self.sensors.has_sensor(sensor)
+
+    def __getattr__(self, name: str) -> Any:
+        """Provide clear error messages when accessing unavailable components.
+
+        This method is only called when normal attribute lookup fails, meaning
+        the component was not initialized (disabled or not present on this robot).
+
+        Args:
+            name: The attribute name being accessed.
+
+        Raises:
+            ComponentNotAvailableError: If the name is a known component that
+                is not available on this robot.
+            AttributeError: If the name is not a known component.
+        """
+        if name in self._KNOWN_COMPONENTS:
+            # Access _robot_model safely to avoid recursion during __init__
+            try:
+                model = object.__getattribute__(self, "_robot_model")
+            except AttributeError:
+                model = "unknown"
+            raise ComponentNotAvailableError(name, model)
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
+
+    def get_controllable_component_map(self) -> dict[str, Any]:
         """Get the component mapping dictionary.
 
         Returns:
@@ -493,7 +563,7 @@ class Robot(RobotQueryInterface):
         if not joint_pos:
             raise ValueError("Joint position dictionary cannot be empty")
 
-        component_map = self.get_component_map()
+        component_map = self.get_controllable_component_map()
         valid_components = set(component_map.keys())
         provided_components = set(joint_pos.keys())
         invalid_components = provided_components - valid_components
@@ -635,30 +705,22 @@ class Robot(RobotQueryInterface):
             Dictionary mapping joint names to joint positions.
 
         Raises:
-            ValueError: If component is not a string or list.
+            ValueError: If component is not a string or list of strings.
             KeyError: If an invalid component name is provided.
-            RuntimeError: If joint position retrieval fails.
         """
-        component_map = self.get_component_map()
+        component_map = self.get_controllable_component_map()
 
-        try:
-            if isinstance(component, str):
-                if component not in component_map:
-                    raise KeyError(f"Invalid component name: {component}")
-                return component_map[component].get_joint_pos_dict()
-            elif isinstance(component, list):
-                joint_pos_dict = {}
-                for c in component:
-                    if c not in component_map:
-                        raise KeyError(f"Invalid component name: {c}")
-                    joint_pos_dict.update(component_map[c].get_joint_pos_dict())
-                return joint_pos_dict
-            else:
-                raise ValueError("Component must be a string or list of strings")
-        except (KeyError, ValueError) as e:
-            raise e
-        except Exception as e:
-            raise RuntimeError(f"Failed to get joint positions: {e}") from e
+        if isinstance(component, str):
+            component = [component]
+        if isinstance(component, list):
+            joint_pos_dict = {}
+            for c in component:
+                if c not in component_map:
+                    raise KeyError(f"Invalid component name: {c}")
+                joint_pos_dict.update(component_map[c].get_joint_pos_dict())
+            return joint_pos_dict
+        else:
+            raise ValueError("Component must be a string or list of strings")
 
     def execute_trajectory(
         self,
@@ -678,7 +740,7 @@ class Robot(RobotQueryInterface):
         Raises:
             ValueError: If trajectory is empty or components have different trajectory lengths.
             ValueError: If trajectory format is invalid.
-            RuntimeError: If trajectory execution fails.
+            DexcontrolError: If trajectory execution fails.
         """
         if not trajectory:
             raise ValueError("Trajectory must be a non-empty dictionary")
@@ -696,7 +758,7 @@ class Robot(RobotQueryInterface):
             )
 
         except Exception as e:
-            raise RuntimeError(f"Failed to execute trajectory: {e}") from e
+            raise DexcontrolError(f"Failed to execute trajectory: {e}") from e
 
     def set_joint_pos(
         self,
@@ -722,14 +784,14 @@ class Robot(RobotQueryInterface):
 
         Raises:
             ValueError: If any component name is invalid.
-            RuntimeError: If joint position setting fails.
+            DexcontrolError: If joint position setting fails.
         """
         if wait_kwargs is None:
             wait_kwargs = {}
 
         try:
             start_time = time.time()
-            component_map = self.get_component_map()
+            component_map = self.get_controllable_component_map()
 
             # Validate component names
             self.validate_component_names(joint_pos)
@@ -772,7 +834,7 @@ class Robot(RobotQueryInterface):
             )
 
         except Exception as e:
-            raise RuntimeError(f"Failed to set joint positions: {e}") from e
+            raise DexcontrolError(f"Failed to set joint positions: {e}") from e
 
     def _wait_for_multi_component_positions(
         self,
@@ -921,7 +983,7 @@ class Robot(RobotQueryInterface):
             ValueError: If invalid component is specified.
         """
         rate_limiter = RateLimiter(control_hz)
-        component_map = self.get_component_map()
+        component_map = self.get_controllable_component_map()
 
         first_component = next(iter(processed_trajectory))
         trajectory_length = len(processed_trajectory[first_component]["position"])

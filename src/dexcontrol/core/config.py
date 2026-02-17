@@ -21,6 +21,11 @@ from dexcontrol.sensors import (
 )
 
 
+def get_robot_config() -> BaseRobotConfig:
+    """Get the default robot configuration without loading URDF."""
+    return RobotInfo.get_default_config()
+
+
 class RobotComponentProtocol(Protocol):
     """Protocol for robot components that can be initialized with name and robot_info."""
 
@@ -49,11 +54,7 @@ class RobotComponentProtocol(Protocol):
         ...
 
 
-def get_robot_config() -> BaseRobotConfig:
-    return RobotInfo().config
-
-
-def get_component_mapping() -> dict[
+def get_component_config_map() -> dict[
     type[BaseComponentConfig], type[RobotComponentProtocol]
 ]:
     component_mapping = {

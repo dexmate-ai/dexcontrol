@@ -173,12 +173,12 @@ def _initialize_robot_and_motion_manager(
     Raises:
         ValueError: If initialization fails.
     """
-    if bot.robot_model == "vega_1u":
-        qpos_dict = bot.get_joint_pos_dict(component=["head", "left_arm", "right_arm"])
-    else:
+    if bot.has_component("torso"):
         qpos_dict = bot.get_joint_pos_dict(
-            component=["head", "torso", "left_arm", "right_arm"]
+            component=["head", "left_arm", "right_arm", "torso"]
         )
+    else:
+        qpos_dict = bot.get_joint_pos_dict(component=["head", "left_arm", "right_arm"])
 
     motion_manager = MotionManager(
         init_visualizer=False,

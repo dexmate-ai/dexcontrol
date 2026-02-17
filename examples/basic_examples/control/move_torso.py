@@ -34,10 +34,6 @@ def main() -> None:
         return
 
     with Robot() as bot:
-        if bot.robot_model == "vega_1u":
-            logger.error("Invalid operation: Vega 1U does not have a torso")
-            return
-
         # Move to intermediate crouching position
         if not bot.torso.is_pose_reached("crouch45_medium"):
             bot.torso.go_to_pose("crouch45_medium", wait_time=4)

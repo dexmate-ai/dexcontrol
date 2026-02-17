@@ -66,10 +66,6 @@ class ChassisVelocityTeleopNode(DualSenseTeleopBase):
         """
         super().__init__(control_hz, button_update_hz, device_index)
 
-        if self.bot.robot_model == "vega_1u":
-            logger.error("Invalid operation: Vega 1U does not have a chassis")
-            return
-
         # Motion control parameters
         self._max_linear_velocity = (
             self.bot.chassis.max_lin_vel

@@ -33,6 +33,7 @@ from jaxtyping import Float
 from loguru import logger
 
 from dexcontrol.core.component import RobotJointComponent
+from dexcontrol.exceptions import ServiceUnavailableError
 
 
 class Hand(RobotJointComponent):
@@ -263,13 +264,13 @@ class HandF5D6V2(Hand):
 
 
 class DexGripper(RobotJointComponent):
-    """Robot head control class.
+    """Robot gripper control class.
 
-    This class provides methods to control a robot head by publishing commands and
+    This class provides methods to control a robot gripper by publishing commands and
     receiving state information through Zenoh communication.
 
     Attributes:
-        mode_querier: Zenoh querier for setting head mode.
+        mode_querier: Zenoh querier for setting gripper mode.
         default_vel: Default joint velocities for all joints.
         max_vel: Maximum allowed joint velocities for all joints.
     """
@@ -279,10 +280,11 @@ class DexGripper(RobotJointComponent):
         name: str,
         robot_info: RobotInfo,
     ) -> None:
-        """Initialize the head controller.
+        """Initialize the gripper controller.
 
         Args:
-            configs: Configuration parameters for the head including communication topics.
+            name: Component name.
+            robot_info: RobotInfo instance.
         """
         config = robot_info.get_component_config(name)
         config = cast(DexSGripperConfig, config)
@@ -335,7 +337,7 @@ class DexGripper(RobotJointComponent):
 
         Raises:
             ValueError: If an invalid mode is specified.
-            RuntimeError: If the service is not available (e.g., no gripper
+            ServiceUnavailableError: If the service is not available (e.g., no gripper
                 detected) or the operation fails.
         """
         valid_modes = ["mit", "velocity", "force"]
@@ -343,14 +345,17 @@ class DexGripper(RobotJointComponent):
             raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}")
 
         if not self._mode_querier.wait_for_service(timeout=5.0):
-            raise RuntimeError(f"Gripper mode service not available for {self._side}")
+            raise ServiceUnavailableError(
+                f"Gripper mode service not available for {self._side}"
+            )
 
         query_msg = {"mode": mode}
         response = self._mode_querier.call(query_msg)
         if response is None:
-            raise RuntimeError(
-                f"Failed to set gripper mode for {self._side}: no response"
-            )
+            response = {
+                "success": False,
+                "message": "Response time out from gripper mode service",
+            }
         return response
 
     def set_joint_pos(

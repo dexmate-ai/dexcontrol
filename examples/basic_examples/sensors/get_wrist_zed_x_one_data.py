@@ -8,15 +8,16 @@
 # 2. Commercial License
 #    For commercial licensing terms, contact: contact@dexmate.ai
 
-"""Example script to show wrist camera data live.
+"""Example script to show ZED X One wrist camera data live.
 
 This script demonstrates how to retrieve wrist camera data (RGB images)
-from the robot's wrist cameras and display them live using matplotlib
+from the robot's ZED X One wrist cameras and display them live using matplotlib
 animation. It showcases the simple API for getting camera data and provides
 live visualization for both left and right wrist cameras.
 
-Note: Wrist cameras only provide RGB streams (single image stream per camera),
-unlike the head camera which provides RGB and depth streams.
+Note: This example assumes ZED X One wrist cameras. The wrist cameras only
+provide RGB streams (single image stream per camera), unlike the head camera
+which provides RGB and depth streams.
 """
 
 import os
@@ -45,18 +46,19 @@ import tyro
 from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
 
+# Sensor config key -> (stream key for data retrieval, display title)
 CAMERA_STREAMS: list[tuple[str, str, str, list[str]]] = [
-    ("left_rgb", "Left Wrist RGB", "left_wrist_camera", ["rgb"]),
-    ("right_rgb", "Right Wrist RGB", "right_wrist_camera", ["rgb"]),
+    ("left_rgb", "Left Wrist ZED X One RGB", "left_wrist_camera", ["rgb"]),
+    ("right_rgb", "Right Wrist ZED X One RGB", "right_wrist_camera", ["rgb"]),
 ]
 
 
 def get_camera_data(robot: Robot) -> dict[str, Any]:
-    """Get wrist camera data from robot sensors."""
+    """Get ZED X One wrist camera data from robot sensors."""
     results = {}
 
     # Left wrist camera
-    if hasattr(robot.sensors, "left_wrist_camera") and robot.sensors.left_wrist_camera:
+    if robot.has_sensor("left_wrist_camera"):
         try:
             obs = robot.sensors.left_wrist_camera.get_obs(include_timestamp=True)
             results["left_rgb"] = obs
@@ -65,10 +67,7 @@ def get_camera_data(robot: Robot) -> dict[str, Any]:
             results["left_rgb"] = None
 
     # Right wrist camera
-    if (
-        hasattr(robot.sensors, "right_wrist_camera")
-        and robot.sensors.right_wrist_camera
-    ):
+    if robot.has_sensor("right_wrist_camera"):
         try:
             obs = robot.sensors.right_wrist_camera.get_obs(include_timestamp=True)
             results["right_rgb"] = obs
@@ -109,7 +108,7 @@ def print_camera_info(camera_info, camera_name):
 
 
 def visualize_camera_data(robot: Robot, fps: float = 30.0) -> None:
-    """Visualize wrist camera data using matplotlib."""
+    """Visualize ZED X One wrist camera data using matplotlib."""
     available_streams = [
         (stream_key, title)
         for stream_key, title, attr_name, _ in CAMERA_STREAMS
@@ -125,7 +124,7 @@ def visualize_camera_data(robot: Robot, fps: float = 30.0) -> None:
     )
     axes = [axes_raw] if len(available_streams) == 1 else list(axes_raw)
 
-    fig.suptitle("Live Wrist Camera Feeds", fontsize=16)
+    fig.suptitle("Live ZED X One Wrist Camera Feeds", fontsize=16)
 
     displays = [ax.imshow(np.zeros((480, 640, 3), dtype=np.uint8)) for ax in axes]
     for ax, (_stream_key, title) in zip(axes, available_streams):
@@ -187,7 +186,7 @@ def _wait_for_camera(camera: Any, name: str, timeout: float = 5.0) -> None:
 
 
 def main(fps: float = 30.0, left: bool = True, right: bool = True) -> None:
-    """Main function to initialize robot and display wrist camera feeds.
+    """Main function to initialize robot and display ZED X One wrist camera feeds.
 
     Args:
         fps: Display refresh rate in Hz (default: 30.0)
@@ -200,12 +199,22 @@ def main(fps: float = 30.0, left: bool = True, right: bool = True) -> None:
 
     configs = get_robot_config()
 
-    # Disable all other sensors to reduce overhead
-    # Enable requested wrist cameras
+    # Enable requested wrist cameras (skip if not available on this robot)
+    if left and not configs.has_sensor("left_wrist_camera"):
+        print("Left wrist camera is not available on this robot configuration")
+        left = False
+    if right and not configs.has_sensor("right_wrist_camera"):
+        print("Right wrist camera is not available on this robot configuration")
+        right = False
+
+    if not (left or right):
+        print("No wrist cameras available on this robot configuration!")
+        return
+
     if left:
-        configs.sensors["left_wrist_camera"].enabled = True
+        configs.enable_sensor("left_wrist_camera")
     if right:
-        configs.sensors["right_wrist_camera"].enabled = True
+        configs.enable_sensor("right_wrist_camera")
 
     with Robot(configs=configs) as robot:
         # Get camera references
@@ -226,12 +235,12 @@ def main(fps: float = 30.0, left: bool = True, right: bool = True) -> None:
         if left_camera is not None:
             _wait_for_camera(left_camera, "Left wrist")
             if hasattr(left_camera, "camera_info"):
-                print_camera_info(left_camera.camera_info, "Left Wrist")
+                print_camera_info(left_camera.camera_info, "Left Wrist ZED X One")
 
         if right_camera is not None:
             _wait_for_camera(right_camera, "Right wrist")
             if hasattr(right_camera, "camera_info"):
-                print_camera_info(right_camera.camera_info, "Right Wrist")
+                print_camera_info(right_camera.camera_info, "Right Wrist ZED X One")
 
         # Start live camera visualization
         visualize_camera_data(robot, fps)

@@ -24,6 +24,7 @@ from typing import Any
 import numpy as np
 from loguru import logger
 
+from dexcontrol.exceptions import ConfigurationError
 from dexcontrol.utils.comm_helper import query_json_service
 from dexcontrol.utils.os_utils import resolve_key_name
 
@@ -33,9 +34,6 @@ try:
 
     WEBRTC_AVAILABLE = True
 except ImportError:
-    logger.warning(
-        "WebRTC dependencies not available. Install: pip install aiortc websockets"
-    )
     websockets = None
     WEBRTC_AVAILABLE = False
 
@@ -109,8 +107,10 @@ class RTCSubscriber:
     def _initialize(self) -> None:
         """Initialize WebRTC connection."""
         if not WEBRTC_AVAILABLE:
-            logger.error(f"{self.name}: WebRTC dependencies not available")
-            return
+            raise ConfigurationError(
+                f"WebRTC dependencies not available for '{self.name}'. "
+                "Install: pip install aiortc websockets"
+            )
 
         # Use direct signaling URL if provided, otherwise query for it
         if self.signaling_url:

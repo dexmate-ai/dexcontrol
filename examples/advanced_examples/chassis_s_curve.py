@@ -88,9 +88,6 @@ def main(
         return
 
     bot = Robot()
-    if bot.robot_model == "vega_1u":
-        logger.error("Invalid operation: Vega 1U does not have a chassis")
-        return
     chassis = bot.chassis
 
     try:

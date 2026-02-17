@@ -8,11 +8,11 @@
 # 2. Commercial License
 #    For commercial licensing terms, contact: contact@dexmate.ai
 
-"""Example script to show head camera data live.
+"""Example script to show head ZED X Mini camera data live.
 
-This script demonstrates how to retrieve head camera data (RGB and depth images)
-from the robot and display them live using matplotlib animation. It showcases the
-simple API for getting camera data and provides live visualization.
+This script demonstrates how to retrieve head ZED X Mini camera data (RGB and depth
+images) from the robot and display them live using matplotlib animation. It showcases
+the simple API for getting camera data and provides live visualization.
 """
 
 import os
@@ -46,7 +46,7 @@ from dexcontrol.robot import Robot
 
 
 def get_camera_data(robot):
-    """Simple function to get camera data from robot sensors.
+    """Simple function to get head ZED X Mini camera data from robot sensors.
 
     This demonstrates how easy it is to get camera data using our API.
     """
@@ -77,7 +77,7 @@ def print_camera_info(camera_info):
         return
 
     print("\n" + "=" * 50)
-    print("HEAD CAMERA INFORMATION")
+    print("HEAD ZED X MINI CAMERA INFORMATION")
     print("=" * 50)
     print_dict(camera_info)
     print("=" * 50)
@@ -89,7 +89,7 @@ def visualize_camera_data(robot, fps: float = 30.0):
     from matplotlib import cm
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    fig.suptitle("Live Head Camera Feeds", fontsize=16)
+    fig.suptitle("Live Head ZED X Mini Camera Feeds", fontsize=16)
 
     # Setup display
     displays = [ax.imshow(np.zeros((480, 640, 3))) for ax in axes]
@@ -148,14 +148,14 @@ def visualize_camera_data(robot, fps: float = 30.0):
 
 
 def main(fps: float = 30.0, use_rtc: bool = False) -> None:
-    """Main function to initialize robot and display camera feeds.
+    """Main function to initialize robot and display head ZED X Mini camera feeds.
 
     Args:
         fps: Display refresh rate in Hz (default: 30.0)
         use_rtc: Use WebRTC for RGB streams if True (default: False)
     """
     configs = get_robot_config()
-    configs.sensors["head_camera"].enabled = True
+    configs.enable_sensor("head_camera")
     configs.sensors["head_camera"].transport = "rtc" if use_rtc else "zenoh"
 
     with Robot(configs=configs) as robot:
