@@ -20,8 +20,6 @@ system-wide operations like status monitoring, trajectory execution, and compone
 control.
 """
 
-from __future__ import annotations
-
 import os
 import signal
 import sys
@@ -67,7 +65,7 @@ if TYPE_CHECKING:
 
 
 # Global registry to track active Robot instances for signal handling
-_active_robots: weakref.WeakSet[Robot] = weakref.WeakSet()
+_active_robots: weakref.WeakSet["Robot"] = weakref.WeakSet()
 _signal_handlers_registered: bool = False
 
 
@@ -127,16 +125,16 @@ class Robot(RobotQueryInterface):
     """
 
     # Type annotations for dynamically created attributes
-    left_arm: Arm
-    right_arm: Arm
-    left_hand: Hand
-    right_hand: Hand
-    head: Head
-    chassis: Chassis
-    torso: Torso
-    battery: Battery
-    estop: EStop
-    heartbeat: Heartbeat
+    left_arm: "Arm"
+    right_arm: "Arm"
+    left_hand: "Hand"
+    right_hand: "Hand"
+    head: "Head"
+    chassis: "Chassis"
+    torso: "Torso"
+    battery: "Battery"
+    estop: "EStop"
+    heartbeat: "Heartbeat"
     sensors: Sensors
     _KNOWN_COMPONENTS: Final[set[str]] = {
         "left_arm",
@@ -154,39 +152,29 @@ class Robot(RobotQueryInterface):
 
     def __init__(
         self,
-        robot_model: str | None = None,
         configs: BaseRobotConfig | None = None,
         auto_shutdown: bool = True,
     ) -> None:
         """Initializes the Robot with the given configuration.
 
+        The robot variant is automatically resolved from the ROBOT_NAME
+        environment variable. You can optionally provide a custom config object.
+
         Args:
-            robot_model: Optional robot variant name
-                (e.g., "vega_1", "vega_1_f5d6", "vega_1u").
-                If configs is None, this will be used to get the appropriate config.
-                If both robot_model and configs are provided, configs takes priority
-                and a warning is logged.
             configs: Configuration parameters for all robot components.
-                If None, will use the configuration specified by robot_model.
+                If None, the configuration is resolved from the ROBOT_NAME
+                environment variable.
             auto_shutdown: Whether to automatically register signal handlers for
                 graceful shutdown on program interruption. Default is True.
 
         Raises:
             ComponentError: If any critical component fails to become active within timeout.
-            ValueError: If robot_model is invalid or configs cannot be loaded.
+            ValueError: If configs cannot be loaded.
         """
         self._shutdown_called: bool = False
         self._components: list[RobotComponent] = []
 
-        if robot_model is not None and configs is not None:
-            logger.warning(
-                "Both 'robot_model' and 'configs' provided. "
-                "'configs' takes priority; 'robot_model' will be ignored."
-            )
-        self._robot_info: RobotInfo = RobotInfo(
-            robot_model if configs is None else None, configs=configs
-        )
-        self._robot_model = robot_model or self._robot_info.robot_model
+        self._robot_info: RobotInfo = RobotInfo(configs=configs)
         self._robot_name = self._robot_info.robot_name
         self._configs: Final[BaseRobotConfig] = self._robot_info.config
 
@@ -213,12 +201,15 @@ class Robot(RobotQueryInterface):
 
     @property
     def robot_model(self) -> str:
-        """Get the robot model.
+        """Get the base robot model.
+
+        The base model is the core platform type without hand/config suffixes
+        (e.g., "vega_1", "vega_1p", "vega_1u").
 
         Returns:
-            The robot model.
+            The base robot model.
         """
-        return self._robot_model
+        return self._robot_info.robot_model
 
     @property
     def robot_name(self) -> str:
@@ -276,8 +267,8 @@ class Robot(RobotQueryInterface):
         table.add_column(style="cyan", no_wrap=True)
         table.add_column(style="white")
 
-        table.add_row("Robot Name", str(self._robot_name))
-        table.add_row("Robot Model", str(self._robot_model))
+        table.add_row("Robot Name", str(self.robot_name))
+        table.add_row("Robot Model", str(self.robot_model))
         table.add_row("Communication Config", os.getenv(COMM_CFG_PATH_ENV_VAR))
 
         console.print(table)
@@ -520,9 +511,10 @@ class Robot(RobotQueryInterface):
             AttributeError: If the name is not a known component.
         """
         if name in self._KNOWN_COMPONENTS:
-            # Access _robot_model safely to avoid recursion during __init__
+            # Access _robot_info safely to avoid recursion during __init__
             try:
-                model = object.__getattribute__(self, "_robot_model")
+                robot_info = object.__getattribute__(self, "_robot_info")
+                model = robot_info.robot_model
             except AttributeError:
                 model = "unknown"
             raise ComponentNotAvailableError(name, model)

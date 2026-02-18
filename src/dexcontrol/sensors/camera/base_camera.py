@@ -26,8 +26,6 @@ Key Features:
     - Production-grade error handling and logging
 """
 
-from __future__ import annotations
-
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -653,7 +651,7 @@ class BaseCameraSensor(ABC):
             if stream is not None and stream.is_active()
         ]
 
-    def __enter__(self) -> BaseCameraSensor:
+    def __enter__(self) -> "BaseCameraSensor":
         """Context manager entry."""
         return self
 

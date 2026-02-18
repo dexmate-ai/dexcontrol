@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.3] - 2026-02-17
+
+### Added
+
+- **Robot model compatibility decorators.** New `supported_models` decorator for example scripts and `requires_model` decorator for class methods, both in `dexcontrol.utils.compat`. Scripts decorated with `@supported_models` check the robot model from environment variables before running and exit with a clear error if the model is unsupported — avoiding unnecessary robot connections. Methods decorated with `@requires_model` raise `ModelNotSupportedError` at call time.
+- **`ModelNotSupportedError` exception.** New exception type raised when a method or script is called on an unsupported robot model. Includes `method`, `robot_model`, and `supported_models` attributes for programmatic handling.
+- **Model annotations on examples.** Examples that require specific hardware (chassis, torso, ultrasonic sensors, chassis cameras) are now annotated with `@supported_models` to prevent confusing errors when run on incompatible robot variants.
+
+### Fixed
+
+- **EE pass-through publish format.** `Arm.send_ee_pass_through_message()` now wraps the message bytes in the expected `{"data": message}` dict format.
+
+### Breaking Changes
+
+- **Removed `variant` parameter from `Robot` constructor.** The robot variant is now always resolved automatically from the `ROBOT_NAME` environment variable. To use a custom configuration, pass `configs=` directly. Callers using `Robot(variant=...)` must remove the argument and rely on the `ROBOT_NAME` environment variable instead, or pass a config object via `Robot(configs=...)`.
+
+### Changed
+
+- **`robot_model` property now returns the base model.** `Robot.robot_model` is derived from `RobotInfo` and returns the core platform type (e.g., `"vega_1"`, `"vega_1p"`, `"vega_1u"`) without hand/config suffixes.
+
 ## [0.4.2] - 2026-02-15
 
 ### Added

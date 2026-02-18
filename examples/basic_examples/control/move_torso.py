@@ -19,8 +19,10 @@ import tyro
 from loguru import logger
 
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
+@supported_models("vega_1", "vega_1p")
 def main() -> None:
     """Move torso through a predefined sequence of positions.
 

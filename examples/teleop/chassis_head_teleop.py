@@ -23,6 +23,7 @@ from dexcomm import RateLimiter
 from loguru import logger
 
 from dexcontrol.apps.dualsense_teleop_base import DualSenseTeleopBase
+from dexcontrol.utils.compat import supported_models
 
 
 class ChassisVelocityTeleopNode(DualSenseTeleopBase):
@@ -328,6 +329,7 @@ class ChassisVelocityTeleopNode(DualSenseTeleopBase):
             logger.error(f"Error stopping motion: {e}")
 
 
+@supported_models("vega_1", "vega_1p")
 def main(
     control_hz: int = 400,
     button_update_hz: int = 20,

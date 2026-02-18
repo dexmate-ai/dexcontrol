@@ -686,7 +686,7 @@ class Arm(RobotJointComponent):
         Args:
             message: The raw bytes message to send to the end effector via RS485.
         """
-        self._ee_pass_through_publisher.publish(message)
+        self._ee_pass_through_publisher.publish({"data": message})
 
     def _on_ee_pass_through_update(self, data: dict[str, Any]) -> None:
         """Handle incoming EE pass-through response updates.

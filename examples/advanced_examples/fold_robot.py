@@ -22,6 +22,7 @@ import tyro
 from loguru import logger
 
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
 def is_running_remote() -> bool:
@@ -205,6 +206,7 @@ def fold_robot(safe_motion: bool = True) -> None:
         logger.info("Robot is folded!")
 
 
+@supported_models("vega_1", "vega_1p")
 def main(
     unfold: bool = False,
     safe_motion: bool = True,

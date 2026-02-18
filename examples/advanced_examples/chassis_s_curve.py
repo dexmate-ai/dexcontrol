@@ -22,6 +22,7 @@ from loguru import logger
 
 from dexcontrol.core.chassis import Chassis
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
 def execute_s_curve(
@@ -67,6 +68,7 @@ def execute_s_curve(
         )
 
 
+@supported_models("vega_1", "vega_1p")
 def main(
     amplitude: float = np.pi / 5,
     frequency: float = 0.5,

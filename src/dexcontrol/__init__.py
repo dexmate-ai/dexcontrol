@@ -15,8 +15,6 @@ This package provides interfaces for controlling and monitoring robot systems.
 It serves as the primary API for interacting with Dexmate robots.
 """
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 from typing import Final
@@ -31,6 +29,7 @@ from dexcontrol.exceptions import (
     ComponentNotAvailableError,
     ConfigurationError,
     DexcontrolError,
+    ModelNotSupportedError,
     RobotConnectionError,
     SensorNotAvailableError,
     ServiceUnavailableError,
@@ -91,6 +90,7 @@ __all__ = [
     "DexcontrolError",
     "ComponentError",
     "ComponentNotAvailableError",
+    "ModelNotSupportedError",
     "SensorNotAvailableError",
     "ConfigurationError",
     "RobotConnectionError",

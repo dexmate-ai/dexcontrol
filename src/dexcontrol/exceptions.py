@@ -4,8 +4,6 @@ This module defines a hierarchy of exceptions for better error handling
 and user experience when connection or configuration issues occur.
 """
 
-from __future__ import annotations
-
 
 class DexcontrolError(Exception):
     """Base exception for all dexcontrol errors.
@@ -86,4 +84,23 @@ class SensorNotAvailableError(ComponentError, AttributeError):
         super().__init__(
             f"Sensor '{sensor}' is not available or not initialized. "
             f"Use robot.has_sensor('{sensor}') to check availability before access."
+        )
+
+
+class ModelNotSupportedError(ComponentError):
+    """Raised when a method is called on an unsupported robot model.
+
+    This indicates that the called method or feature is not available
+    on the current robot model.
+    """
+
+    def __init__(
+        self, method: str, robot_model: str, supported_models: tuple[str, ...]
+    ) -> None:
+        self.method = method
+        self.robot_model = robot_model
+        self.supported_models = supported_models
+        super().__init__(
+            f"'{method}' is not supported on model '{robot_model}'. "
+            f"Supported models: {', '.join(supported_models)}"
         )

@@ -20,8 +20,10 @@ from loguru import logger
 
 from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
+@supported_models("vega_1")
 def main() -> None:
     """Gets and logs ultrasonic sensor reading.
 

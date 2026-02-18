@@ -43,6 +43,7 @@ from loguru import logger
 
 from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
 class LiveCameraDisplay:
@@ -125,6 +126,7 @@ class LiveCameraDisplay:
         plt.close(self.fig)
 
 
+@supported_models("vega_1", "vega_1p")
 def main(use_rtc: bool = False, fps: float = 10.0) -> None:
     """Initializes the robot, retrieves chassis camera data, and displays it in real-time.
 
