@@ -1,0 +1,222 @@
+// robotenv.proto - RobotEnv gRPC Service Specification
+//
+// This service provides a robot-agnostic interface for robot control.
+// Implement this service to make your robot compatible with the control loop.
+//
+// Key concepts:
+// - Observations: Robot state (joints, gripper, etc.) returned by the robot
+// - Actions: Commands sent to the robot (cartesian velocity, joint position, etc.)
+// - Action spaces: Different representations of commands (cartesian vs joint)
+// - Dual-arm: Run two service instances for dual-arm robots
+
+syntax = "proto3";
+
+package robotenv;
+
+// RobotEnv service manages robot hardware and provides control interface.
+service RobotEnv {
+    // GetObservationSpec returns the schema of observations this robot provides.
+    // Call this once at startup to understand what fields are available.
+    //
+    // Example: If robot provides joint_positions and cartesian_position,
+    // control loop knows it can use both for policy input.
+    rpc GetObservationSpec(GetObservationSpecRequest) returns (ObservationSpec);
+
+    // GetConfig returns robot hardware configuration.
+    // Includes gripper type, frame type, degrees of freedom, etc.
+    rpc GetConfig(GetConfigRequest) returns (RobotConfig);
+
+    // Reset robot to initial state.
+    // Supports different reset modes: home, random, target position, or current.
+    //
+    // Returns initial observation after reset completes.
+    rpc Reset(ResetRequest) returns (ResetResponse);
+
+    // Step executes one action and returns the resulting observation.
+    // This is a blocking call - returns when action is executed and fresh observation is ready.
+    //
+    // Action is provided in the specified action_space (e.g., cartesian_velocity, joint_position).
+    // Returns robot state observation after executing the action.
+    rpc Step(StepRequest) returns (StepResponse);
+
+    // HealthCheck verifies service is running and ready.
+    // Used for service discovery and readiness probes.
+    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// ============================================================================
+// Request/Response Messages
+// ============================================================================
+
+message GetObservationSpecRequest {
+    // Empty request - spec doesn't change
+}
+
+message GetConfigRequest {
+    // Empty request - config doesn't change
+}
+
+message HealthCheckRequest {
+    // Empty request
+}
+
+// ============================================================================
+// ObservationSpec - describes observation schema
+// ============================================================================
+
+message ObservationSpec {
+    // Map of field name to field specification
+    // Example: {"joint_positions": FieldSpec{dtype: "float64", shape: [7], ...}}
+    map<string, FieldSpec> fields = 1;
+
+    // Number of arms this robot has (1 for single-arm, 2 for dual-arm)
+    int32 num_arms = 2;
+
+    // Metadata about robot capabilities
+    map<string, string> metadata = 3;
+}
+
+message FieldSpec {
+    // Data type: "float32", "float64", "int64", "uint8", etc.
+    string dtype = 1;
+
+    // Shape of the data (e.g., [7] for joint_positions, [6] for cartesian)
+    // Empty array means scalar value
+    repeated int32 shape = 2;
+
+    // Whether this field is always present (true) or optional (false)
+    bool required = 3;
+
+    // Human-readable description of this field
+    string description = 4;
+}
+
+// ============================================================================
+// Reset - initialize robot state
+// ============================================================================
+
+message ResetRequest {
+    // Reset mode: "home", "random", "target", "current"
+    //
+    // - "home": Move to default home position (params ignored)
+    // - "random": Randomize within safe joint limits (params ignored)
+    // - "target": Move to specific target (params must include target state)
+    // - "current": No movement, just return current state (params ignored)
+    string mode = 1;
+
+    // Mode-specific parameters
+    // For "target" mode: {"joint_positions": [7 floats]} or {"cartesian_position": [6 floats]}
+    map<string, Value> params = 2;
+}
+
+message ResetResponse {
+    // Initial observation after reset
+    map<string, Value> observation = 1;
+
+    // Status code: "SUCCESS" or error code (e.g., "JOINT_LIMIT_EXCEEDED")
+    string status = 2;
+
+    // Human-readable status message
+    string message = 3;
+
+    // Observation timestamp in microseconds since epoch
+    int64 timestamp_us = 4;
+}
+
+// ============================================================================
+// Step - execute action
+// ============================================================================
+
+message StepRequest {
+    // Action vector
+    // - For cartesian spaces: [vx, vy, vz, roll_vel, pitch_vel, yaw_vel, gripper] (7D)
+    // - For joint spaces: [j1, j2, j3, j4, j5, j6, j7, gripper] (8D)
+    repeated double action = 1;
+
+    // Action space type:
+    // - "cartesian_velocity": Cartesian velocity control (7D)
+    // - "cartesian_delta": Cartesian position delta (7D)
+    // - "joint_position": Joint position control (8D)
+    // - "joint_velocity": Joint velocity control (8D)
+    // - "joint_delta": Joint position delta (8D)
+    string action_space = 2;
+
+    // Gripper action space: "position" (absolute) or "velocity" (delta)
+    // If not specified, inferred from action_space (velocity actions → velocity, otherwise position)
+    string gripper_action_space = 3;
+}
+
+message StepResponse {
+    // Robot state observation after executing action
+    map<string, Value> observation = 1;
+
+    // Status code:
+    // - "SUCCESS": Action executed successfully
+    // - "ESTOP_TRIGGERED": Emergency stop was triggered
+    // - "JOINT_LIMIT_EXCEEDED": Joint limit violation
+    // - "COMMUNICATION_FAILED": Lost connection to robot hardware
+    // - "COLLISION_DETECTED": Collision detected
+    string status = 2;
+
+    // Detailed error message (empty if status is SUCCESS)
+    string message = 3;
+
+    // Observation timestamp in microseconds since epoch
+    int64 timestamp_us = 4;
+}
+
+// ============================================================================
+// Robot Configuration
+// ============================================================================
+
+message RobotConfig {
+    // Gripper type: "franka_hand", "robotiq", "robotiq_2f85", etc.
+    string gripper_type = 1;
+
+    // Frame type: "plane_frame_v1", "y_frame_v1", etc.
+    // Indicates robot mounting orientation
+    string frame_type = 2;
+
+    // Degrees of freedom (e.g., [7] for Franka)
+    repeated int32 dof = 3;
+
+    // Supported action spaces
+    // Example: ["cartesian_velocity", "cartesian_delta", "joint_position"]
+    repeated string supported_action_spaces = 4;
+
+    // Additional robot-specific metadata
+    map<string, string> metadata = 5;
+}
+
+// ============================================================================
+// Health Check
+// ============================================================================
+
+message HealthCheckResponse {
+    // Service status: "HEALTHY", "DEGRADED", "UNHEALTHY"
+    string status = 1;
+
+    // Optional details about service health
+    string message = 2;
+
+    // Service version (optional)
+    string version = 3;
+}
+
+// ============================================================================
+// Value - flexible value type for observations and parameters
+// ============================================================================
+
+message Value {
+    oneof kind {
+        double float_value = 1;
+        FloatArray float_array = 2;
+        int64 int_value = 3;
+        string string_value = 4;
+        bytes bytes_value = 5;  // For images or binary data
+    }
+}
+
+message FloatArray {
+    repeated double values = 1;
+}
