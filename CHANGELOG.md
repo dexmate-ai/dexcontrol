@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.4] - 2026-02-18
+
+### Fixed
+
+- **Double-namespaced Zenoh topics in RTC and Arm.** `RTCSubscriber._query_connection_info()` was calling `resolve_key_name()` before passing the topic to `query_json_service()`, which already applies `resolve_key_name()` internally — resulting in the robot name prefix being added twice. Similarly, `Arm` was wrapping `config.ee_pass_through_pub_topic` with `resolve_key_name()` before passing it to `create_publisher()`, which handles namespace resolution at the communication layer. Both call sites now pass the raw topic directly.
+
 ## [0.4.3] - 2026-02-17
 
 ### Added

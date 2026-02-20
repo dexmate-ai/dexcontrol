@@ -38,7 +38,6 @@ from rich.console import Console
 
 from dexcontrol.core.component import RobotComponent, RobotJointComponent
 from dexcontrol.exceptions import ServiceUnavailableError
-from dexcontrol.utils.os_utils import resolve_key_name
 from dexcontrol.utils.trajectory_utils import generate_linear_trajectory
 
 
@@ -107,7 +106,7 @@ class Arm(RobotJointComponent):
         self._latest_ee_pass_through_data: dict[str, Any] | None = None
         if self.enable_ee_pass_through:
             self._ee_pass_through_publisher = self._node.create_publisher(
-                topic=resolve_key_name(config.ee_pass_through_pub_topic),
+                topic=config.ee_pass_through_pub_topic,
                 encoder=EEPassThroughCmdCodec.encode,
             )
             # Subscribe to EE pass-through response topic
