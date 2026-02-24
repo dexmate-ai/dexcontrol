@@ -399,6 +399,8 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         self._robot.update_gripper(0.0, velocity=False, blocking=True)
         self._robot.update_joints(self.safe_transit_pose, velocity=False, blocking=True)
         self._robot.update_joints(np.asarray(target_joints, dtype=np.float64), velocity=False, blocking=True)
+        # Allow time for the arm to reach the target before we return the observation
+        time.sleep(4.0)
 
     def _extract_target_joints(self, request) -> np.ndarray:
         if "joint_positions" not in request.params:
@@ -407,6 +409,17 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         if len(joint_values) != 7:
             raise ValueError(f"Expected 7 joint values, got {len(joint_values)}")
         target = np.asarray(joint_values, dtype=np.float64)
+        limits = self._robot.arm.joint_pos_limit
+        if limits is not None:
+            low = limits[:, 0].astype(np.float64)
+            high = limits[:, 1].astype(np.float64)
+            violates = np.logical_or(target < low, target > high)
+            if np.any(violates):
+                target = np.clip(target, low, high)
+                LOGGER.warning(
+                    "Reset target joints clipped to limits (violated indices: %s)",
+                    np.where(violates)[0].tolist(),
+                )
         self._robot.validate_joint_limits(target)
         return target
 

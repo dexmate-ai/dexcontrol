@@ -205,11 +205,11 @@ class RobotEnvClient:
         self.action_space = action_space
         self.gripper_action_space = gripper_action_space
 
-        # Reset joints configuration (from frame.yaml via policy_runner)
+        # reset_joints: if None, client uses mode "home" (server's L_shape); else mode "target".
         if reset_joints is not None:
             self.reset_joints = np.array(reset_joints)
         else:
-            self.reset_joints = np.array([0, -np.pi/5, 0, -4*np.pi/5, 0, 3*np.pi/5, 0.7])
+            self.reset_joints = None  # use server default (home = L_shape)
 
         print(f"[RobotEnvClient] Connecting to RobotEnv service at {robot_ip}:{robot_port}")
 
@@ -263,32 +263,44 @@ class RobotEnvClient:
 
         # Initial reset (matches RobotEnv.__init__ do_reset behavior)
         if do_reset:
-            print(f"[RobotEnvClient] Initial reset with joints: {self.reset_joints.tolist()}")
+            reset_desc = (
+                f"mode=home (server L_shape)"
+                if self.reset_joints is None
+                else f"joints: {self.reset_joints.tolist()}"
+            )
+            print(f"[RobotEnvClient] Initial reset with {reset_desc}")
             self.reset(randomize=randomize)
 
     # ------------------------------------------------------------------
     # reset() - matches RobotEnv.reset() which returns None
     # ------------------------------------------------------------------
     def reset(self, randomize=True, reset_pose=None, **kwargs):
-        """Reset robot to initial state using self.reset_joints.
+        """Reset robot to initial state.
 
-        Uses "target" mode to send the configured reset_joints to the server,
-        matching RobotEnv behavior where reset_joints come from frame.yaml.
+        If reset_joints was not provided at init, uses mode "home" (server's
+        default = Vega L_shape / unfold pose). Otherwise uses mode "target"
+        with the configured reset_joints.
 
         Returns None to match original RobotEnv.reset() behavior.
         """
         if reset_pose is not None:
-            target_joints = reset_pose
+            mode = "target"
+            target_joints = np.asarray(reset_pose, dtype=np.float64)
+            params = {
+                "joint_positions": robotenv_pb2.Value(
+                    float_array=robotenv_pb2.FloatArray(values=target_joints.tolist())
+                )
+            }
+        elif self.reset_joints is not None:
+            mode = "target"
+            params = {
+                "joint_positions": robotenv_pb2.Value(
+                    float_array=robotenv_pb2.FloatArray(values=self.reset_joints.tolist())
+                )
+            }
         else:
-            target_joints = self.reset_joints
-
-        # Always use target mode with configured joints
-        mode = "target"
-        params = {
-            "joint_positions": robotenv_pb2.Value(
-                float_array=robotenv_pb2.FloatArray(values=target_joints.tolist())
-            )
-        }
+            mode = "home"
+            params = {}
 
         print(f"[RobotEnvClient] Resetting with mode: {mode}")
 

@@ -20,11 +20,14 @@ for _path in (_DEXCONTROL_SRC, _DEXCONTROL_TELEOP):
         sys.path.insert(0, str(_path))
 
 from dexcontrol import Robot
+from dexbot_utils.configs import get_robot_config
 
+_base_arm_teleop_error = None
 try:
     from base_arm_teleop import BaseIKController
-except ImportError:
+except ImportError as e:
     BaseIKController = None
+    _base_arm_teleop_error = e
 
 try:
     from dexmotion.utils import robot_utils
@@ -74,23 +77,32 @@ class VegaRobot:
         if arm_side not in ("left", "right"):
             raise ValueError(f"arm_side must be 'left' or 'right', got: {arm_side}")
         if BaseIKController is None:
-            raise ImportError(
-                "BaseIKController not found. Ensure custom_dexcontrol/examples/teleop is available."
+            msg = (
+                "BaseIKController not found. Ensure custom_dexcontrol/examples/teleop is available "
+                "and dependencies are installed (e.g. pip install pytransform3d dexmotion dualsense_controller)."
             )
+            if _base_arm_teleop_error is not None:
+                msg += f" Original error: {_base_arm_teleop_error}"
+            raise ImportError(msg) from _base_arm_teleop_error
 
         self.robot_model = robot_model
         self.arm_side = arm_side
         self.control_hz = int(control_hz)
         self.gripper_type = gripper_type
 
-        self.robot = Robot(robot_model=robot_model)
+        configs = get_robot_config(robot_model)
+        self.robot = Robot(configs=configs)
         self.arm = getattr(self.robot, f"{arm_side}_arm")
-        self.hand = getattr(self.robot, f"{arm_side}_hand")
+        hand_component = f"{arm_side}_hand"
+        self.hand = getattr(self.robot, hand_component) if self.robot.has_component(hand_component) else None
 
         self.ik_controller = BaseIKController(bot=self.robot, visualize=False)
         self._arm_joint_names = [f"{arm_side[0].upper()}_arm_j{i + 1}" for i in range(7)]
 
-        self.reset_joints = np.asarray(self.arm.get_joint_pos(), dtype=np.float64)
+        # Use Vega unfold pose (L_shape) as default reset, same as fold_robot.py unfold.
+        self.reset_joints = np.asarray(
+            self.arm.get_predefined_pose("L_shape"), dtype=np.float64
+        )
         self.safe_transit_pose = self.reset_joints.copy()
 
         self._gripper_open_pos, self._gripper_close_pos = self._init_gripper_reference()
@@ -177,6 +189,9 @@ class VegaRobot:
         self.sync_motion_manager_with_arm(target_joint_pos)
 
     def update_gripper(self, command: float, velocity: bool = True, blocking: bool = False) -> None:
+        if self.hand is None:
+            self._prev_gripper_command_successful = True
+            return
         current = self._normalize_gripper_position(np.asarray(self.hand.get_joint_pos(), dtype=np.float64))
         if velocity:
             target = current + float(command) * (1.0 / max(1, self.control_hz))
@@ -202,9 +217,15 @@ class VegaRobot:
     def get_robot_state(self) -> tuple[dict[str, Any], dict[str, int]]:
         joint_positions = np.asarray(self.arm.get_joint_pos(), dtype=np.float64)
         joint_velocities = np.asarray(self.arm.get_joint_vel(), dtype=np.float64)
-        joint_torques = np.asarray(self.arm.get_joint_torque(), dtype=np.float64)
-        hand_joint_pos = np.asarray(self.hand.get_joint_pos(), dtype=np.float64)
-        gripper_position = float(self._normalize_gripper_position(hand_joint_pos))
+        try:
+            joint_torques = np.asarray(self.arm.get_joint_torque(), dtype=np.float64)
+        except ValueError:
+            joint_torques = np.zeros(7, dtype=np.float64)
+        if self.hand is not None:
+            hand_joint_pos = np.asarray(self.hand.get_joint_pos(), dtype=np.float64)
+            gripper_position = float(self._normalize_gripper_position(hand_joint_pos))
+        else:
+            gripper_position = 0.0
 
         wrench_state = np.zeros(6, dtype=np.float64)
         if getattr(self.arm, "wrench_sensor", None) is not None:
@@ -275,6 +296,8 @@ class VegaRobot:
         return target_joint_pos
 
     def _init_gripper_reference(self) -> tuple[np.ndarray, np.ndarray]:
+        if self.hand is None:
+            return np.array([0.0], dtype=np.float64), np.array([1.0], dtype=np.float64)
         try:
             open_pos = np.asarray(self.hand.get_predefined_pose("open"), dtype=np.float64)
         except Exception:
