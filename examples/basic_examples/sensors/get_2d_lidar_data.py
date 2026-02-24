@@ -84,7 +84,7 @@ def print_scan_info(
 def main() -> None:
     """Initializes the robot, retrieves LIDAR data, and displays it."""
     configs = get_vega_config()
-    configs.sensors.lidar.enable = True
+    configs.enable_sensor("lidar")
     robot = Robot(configs=configs)
 
     try:

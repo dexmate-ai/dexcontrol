@@ -40,17 +40,17 @@ def main() -> None:
                 bot.right_arm.get_timestamp_ns(),
             ),
         }
-        if hasattr(bot, "head"):
+        if bot.has_component("head"):
             joint_positions["Head"] = (
                 bot.head.get_joint_pos(),
                 bot.head.get_timestamp_ns(),
             )
-        if hasattr(bot, "torso"):
+        if bot.has_component("torso"):
             joint_positions["Torso"] = (
                 bot.torso.get_joint_pos(),
                 bot.torso.get_timestamp_ns(),
             )
-        if hasattr(bot, "chassis"):
+        if bot.has_component("chassis"):
             joint_positions["Chassis_Steer"] = (
                 bot.chassis.chassis_steer.get_joint_pos(),
                 bot.chassis.chassis_steer.get_timestamp_ns(),

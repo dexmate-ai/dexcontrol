@@ -24,10 +24,13 @@ import time
 from typing import Literal
 
 import tyro
+from loguru import logger
 
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
+@supported_models("vega_1", "vega_1p", "vega_1u")
 def main(
     side: Literal["left", "right", "both"] = "left",
     message_hex: str = "09 10 03 E8 00 03 06 01 00 00 00 00 00 72 E1",
@@ -46,11 +49,11 @@ def main(
     with Robot() as bot:
         # Convert hex string to bytes
         message = bytes.fromhex(message_hex.replace(" ", ""))
-        print(f"Sending message: {message.hex(' ')}")
+        logger.info(f"Sending message: {message.hex(' ')}")
 
         if side in ("left", "both"):
             if bot.left_arm.enable_ee_pass_through:
-                print("Sending to left arm EE...")
+                logger.info("Sending to left arm EE...")
                 bot.left_arm.send_ee_pass_through_message(message)
 
                 if wait_response:
@@ -58,17 +61,19 @@ def main(
                     while time.time() - start < timeout:
                         response = bot.left_arm.get_ee_pass_through_response()
                         if response is not None:
-                            print(f"Left arm EE response: {response}")
+                            logger.info(f"Left arm EE response: {response}")
                             break
                         time.sleep(0.01)
                     else:
-                        print("Left arm: No response received within timeout")
+                        logger.warning("Left arm: No response received within timeout")
             else:
-                print("Left arm: EE pass-through not enabled (known EE type detected)")
+                logger.warning(
+                    "Left arm: EE pass-through not enabled (known EE type detected)"
+                )
 
         if side in ("right", "both"):
             if bot.right_arm.enable_ee_pass_through:
-                print("Sending to right arm EE...")
+                logger.info("Sending to right arm EE...")
                 bot.right_arm.send_ee_pass_through_message(message)
 
                 if wait_response:
@@ -76,13 +81,15 @@ def main(
                     while time.time() - start < timeout:
                         response = bot.right_arm.get_ee_pass_through_response()
                         if response is not None:
-                            print(f"Right arm EE response: {response}")
+                            logger.info(f"Right arm EE response: {response}")
                             break
                         time.sleep(0.01)
                     else:
-                        print("Right arm: No response received within timeout")
+                        logger.warning("Right arm: No response received within timeout")
             else:
-                print("Right arm: EE pass-through not enabled (known EE type detected)")
+                logger.warning(
+                    "Right arm: EE pass-through not enabled (known EE type detected)"
+                )
 
 
 if __name__ == "__main__":

@@ -20,8 +20,10 @@ from loguru import logger
 
 from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
+@supported_models("vega_1")
 def main() -> None:
     """Gets and logs ultrasonic sensor reading.
 
@@ -31,7 +33,7 @@ def main() -> None:
     The ultrasonic sensor returns distance measurements in meters.
     """
     configs = get_robot_config()
-    configs.sensors["ultrasonic"].enabled = True
+    configs.enable_sensor("ultrasonic")
     with Robot(configs=configs) as bot:
         # Get and log ultrasonic sensor reading
         distance = bot.sensors.ultrasonic.get_obs()

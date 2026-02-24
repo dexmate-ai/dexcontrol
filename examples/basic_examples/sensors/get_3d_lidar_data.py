@@ -183,10 +183,10 @@ def main():
     print("3D LiDAR Data Access Example")
     print("=" * 60)
     configs = get_vega_config()
-    configs.sensors.front_lidar_3d.enable = True
+    configs.enable_sensor("front_lidar_3d")
     with Robot(configs=configs) as robot:
         # Check if 3D lidar is available
-        if not hasattr(robot.sensors, "front_lidar_3d"):
+        if not robot.has_sensor("front_lidar_3d"):
             print("❌ Front 3D LiDAR sensor not available on this robot")
             return
 

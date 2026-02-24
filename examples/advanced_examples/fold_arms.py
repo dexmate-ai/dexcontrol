@@ -76,7 +76,7 @@ def main(comp_pitch: bool = False) -> None:
 
         if comp_pitch:
             # Compensate for torso pitch and move arms
-            if hasattr(bot, "torso"):
+            if bot.has_component("torso"):
                 torso_pitch = bot.torso.pitch_angle
             else:
                 torso_pitch = np.pi / 2  # Default for upper body variants

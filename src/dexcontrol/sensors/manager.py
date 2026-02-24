@@ -64,12 +64,54 @@ class Sensors:
             configs: Configuration for all sensors (VegaSensorsConfig or DictConfig).
         """
         self._sensors: list[Any] = []
+        self._config_sensor_names: set[str] = set(configs.keys())
 
         for sensor_name, sensor_config in configs.items():
             sensor = self._create_sensor(sensor_config, str(sensor_name))
             if sensor is not None:
                 setattr(self, str(sensor_name), sensor)
                 self._sensors.append(sensor)
+
+    def __getattr__(self, name: str) -> Any:
+        """Provide clear error messages when accessing unavailable sensors.
+
+        This method is only called when normal attribute lookup fails, meaning
+        the sensor was not initialized (disabled or not present on this robot).
+
+        Args:
+            name: The attribute name being accessed.
+
+        Raises:
+            SensorNotAvailableError: If the name is a known sensor that
+                is not available on this robot.
+            AttributeError: If the name is not a known sensor.
+        """
+        from dexcontrol.exceptions import SensorNotAvailableError
+
+        try:
+            known = object.__getattribute__(self, "_config_sensor_names")
+        except AttributeError:
+            known = set()
+        if name in known:
+            raise SensorNotAvailableError(name)
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
+
+    def has_sensor(self, name: str) -> bool:
+        """Check if a sensor is initialized and available.
+
+        Args:
+            name: The sensor name (e.g., "head_imu", "ultrasonic").
+
+        Returns:
+            True if the sensor exists and was successfully initialized.
+        """
+        try:
+            sensor = object.__getattribute__(self, name)
+            return sensor is not None
+        except AttributeError:
+            return False
 
     def _create_sensor(self, config: BaseComponentConfig, name: str) -> Any | None:
         """Creates and initializes a sensor from config.
@@ -120,7 +162,8 @@ class Sensors:
         Returns:
             List of sensor names that are currently active.
         """
-        excluded_attrs = {'shutdown', 'get_active_sensors', 'wait_for_sensors'}
+        excluded_attrs = {'shutdown', 'get_active_sensors', 'wait_for_sensors',
+                          'wait_for_all_active', 'get_sensor_count', 'has_sensor'}
         active_sensors = []
 
         for attr_name in dir(self):

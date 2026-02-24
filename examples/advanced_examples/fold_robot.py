@@ -22,6 +22,7 @@ import tyro
 from loguru import logger
 
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
 def is_running_remote() -> bool:
@@ -45,9 +46,6 @@ def unfold_robot() -> None:
 
     with Robot() as bot:
         # First move torso
-        if bot.robot_model == "vega_1u":
-            logger.error("Invalid operation: Vega 1U does not have a torso")
-            return
         if not bot.torso.is_pose_reached(torso_pose):
             logger.info("Moving torso to operational position")
             bot.set_joint_pos(
@@ -110,9 +108,6 @@ def fold_robot(safe_motion: bool = True) -> None:
     partial_fold_joints: Final[list[int]] = list(range(6))
 
     with Robot() as bot:
-        if bot.robot_model == "vega_1u":
-            logger.error("Invalid operation: Vega 1U does not have hands")
-            return
         # Close hands first
         if bot.have_hand("left"):
             logger.info("Closing hands before folding arms")
@@ -211,6 +206,7 @@ def fold_robot(safe_motion: bool = True) -> None:
         logger.info("Robot is folded!")
 
 
+@supported_models("vega_1", "vega_1p")
 def main(
     unfold: bool = False,
     safe_motion: bool = True,

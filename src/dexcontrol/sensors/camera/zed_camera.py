@@ -51,8 +51,6 @@ Example Usage:
     ```
 """
 
-from __future__ import annotations
-
 from typing import Any, cast
 
 import numpy as np
@@ -98,7 +96,7 @@ class ZedCameraSensor(BaseCameraSensor):
             name: Unique identifier for this camera sensor.
 
         Raises:
-            RuntimeError: If Node creation fails.
+            ServiceUnavailableError: If Node creation fails.
         """
         super().__init__(name=name)
 
@@ -465,7 +463,7 @@ class ZedXOneCameraSensor(BaseCameraSensor):
                 - buffer_size (int): Frame buffer size (default: 1).
 
         Raises:
-            RuntimeError: If stream creation fails.
+            ServiceUnavailableError: If stream creation fails.
         """
         super().__init__(name=name)
         cam_config = cast(CameraConfig, getattr(configs, "rgb"))

@@ -22,8 +22,10 @@ import tyro
 from loguru import logger
 
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
+@supported_models("vega_1", "vega_1p")
 def main(
     joint_idx: int = 2,
 ) -> None:
@@ -50,10 +52,6 @@ def main(
 
     # Initialize robot and move to safe starting position
     bot = Robot()
-
-    if bot.robot_model == "vega_1u":
-        logger.error("Invalid operation: Vega 1U does not have a torso")
-        return
 
     # Ensure arms are folded
     if not (

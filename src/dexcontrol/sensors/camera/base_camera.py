@@ -26,8 +26,6 @@ Key Features:
     - Production-grade error handling and logging
 """
 
-from __future__ import annotations
-
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -39,16 +37,14 @@ from dexcomm import Node
 from dexcomm.codecs import DepthImageCodec, RGBImageCodec
 from loguru import logger
 
+from dexcontrol.exceptions import ConfigurationError, ServiceUnavailableError
+
 # RTC imports (optional for systems without hardware video support)
 try:
     from dexcomm.rtc import RtcConfig, VideoCodec, VideoSubscriber
 
     RTC_AVAILABLE = True
 except ImportError:
-    logger.warning(
-        "dexcomm.rtc not available - RTC transport will be disabled. "
-        "Rebuild dexcomm with 'rtc' feature enabled."
-    )
     RTC_AVAILABLE = False
     VideoSubscriber = None
     VideoCodec = None
@@ -132,7 +128,7 @@ class StreamSubscriber:
 
         Raises:
             ValueError: If required parameters are missing or invalid.
-            RuntimeError: If RTC is requested but not available.
+            ConfigurationError: If RTC is requested but not available.
         """
         self.stream_name = stream_name
         self.transport = transport
@@ -216,12 +212,13 @@ class StreamSubscriber:
 
         Raises:
             ValueError: If required parameters are missing.
-            RuntimeError: If RTC support is not available.
+            ConfigurationError: If RTC support is not available.
         """
         if not RTC_AVAILABLE:
-            raise RuntimeError(
+            raise ConfigurationError(
                 f"RTC transport requested for '{self.stream_name}' but "
-                "dexcomm.rtc is not available. Rebuild dexcomm with 'rtc' feature."
+                "dexcomm.rtc is not available. "
+                "Rebuild dexcomm with 'rtc' feature enabled."
             )
 
         if self.stream_type == StreamType.DEPTH:
@@ -439,7 +436,7 @@ class BaseCameraSensor(ABC):
             name: Unique identifier for this camera sensor.
 
         Raises:
-            RuntimeError: If Node creation fails.
+            ServiceUnavailableError: If Node creation fails.
         """
         self._name = name
         self._node: Node | None = None
@@ -451,7 +448,7 @@ class BaseCameraSensor(ABC):
             logger.info(f"Created DexComm Node for camera '{name}'")
         except Exception as e:
             logger.error(f"Failed to create DexComm Node for '{name}': {e}")
-            raise RuntimeError(f"Node creation failed: {e}") from e
+            raise ServiceUnavailableError(f"Node creation failed: {e}") from e
 
     def _create_stream(
         self,
@@ -654,7 +651,7 @@ class BaseCameraSensor(ABC):
             if stream is not None and stream.is_active()
         ]
 
-    def __enter__(self) -> BaseCameraSensor:
+    def __enter__(self) -> "BaseCameraSensor":
         """Context manager entry."""
         return self
 

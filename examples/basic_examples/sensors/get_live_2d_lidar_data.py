@@ -21,9 +21,9 @@ import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 import tyro
-from dexcontrol.config.vega import get_vega_config
 from loguru import logger
 
+from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
 
 try:
@@ -238,8 +238,8 @@ def main(update_rate: float = 10.0) -> None:
     Args:
         update_rate: Update frequency in Hz for the animation.
     """
-    configs = get_vega_config()
-    configs.sensors.lidar.enable = True
+    configs = get_robot_config()
+    configs.enable_sensor("lidar")
     robot = Robot(configs=configs)
 
     try:

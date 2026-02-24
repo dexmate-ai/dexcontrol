@@ -149,7 +149,8 @@ class RobotQueryInterface:
             UNKNOWN means not connected or unknown end effector connected.
 
         Raises:
-            RuntimeError: If hand type information cannot be retrieved after 3 attempts.
+            RobotConnectionError: If cannot connect to robot.
+            ServiceUnavailableError: If hand type information cannot be retrieved after 3 attempts.
         """
         last_error = None
 
@@ -157,7 +158,8 @@ class RobotQueryInterface:
         if not self._hand_querier.wait_for_service(timeout=10.0):  # type: ignore[attr-defined]
             raise RobotConnectionError(
                 "Cannot connect to robot (timeout after 10s).\n"
-                "  Check that robot is powered on and network is reachable."
+                "  1. Run 'dextop topic list' to verify you can receive topics from the robot.\n"
+                "  2. Check that robot is powered on and network is reachable."
             )
 
         for _ in range(max_attempts):
@@ -292,7 +294,7 @@ class RobotQueryInterface:
             }
 
         Raises:
-            RuntimeError: If version information cannot be retrieved.
+            ServiceUnavailableError: If version information cannot be retrieved.
         """
         # wait_for_service is implemented in Rust, not in Python type stubs
         if not self._version_querier.wait_for_service(timeout=5.0):  # type: ignore[attr-defined]
@@ -350,7 +352,7 @@ class RobotQueryInterface:
 
         Raises:
             ValueError: If the specified component is invalid.
-            RuntimeError: If the reboot operation fails.
+            ServiceUnavailableError: If the reboot operation fails.
         """
         # wait_for_service is implemented in Rust, not in Python type stubs
         if not self._reboot_querier.wait_for_service(timeout=5.0):  # type: ignore[attr-defined]
@@ -379,7 +381,7 @@ class RobotQueryInterface:
 
         Raises:
             ValueError: If the specified component is invalid.
-            RuntimeError: If the error clearing operation fails.
+            ServiceUnavailableError: If the error clearing operation fails.
         """
         component_map = {
             "left_arm": RobotComponentEnum.LEFT_ARM,

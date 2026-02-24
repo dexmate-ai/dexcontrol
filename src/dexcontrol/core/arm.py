@@ -37,7 +37,7 @@ from loguru import logger
 from rich.console import Console
 
 from dexcontrol.core.component import RobotComponent, RobotJointComponent
-from dexcontrol.utils.os_utils import resolve_key_name
+from dexcontrol.exceptions import ServiceUnavailableError
 from dexcontrol.utils.trajectory_utils import generate_linear_trajectory
 
 
@@ -46,6 +46,16 @@ class Arm(RobotJointComponent):
 
     This class provides methods to control a robot arm by publishing commands and
     receiving state information through Zenoh communication.
+
+    Error handling convention for service calls:
+        - **Read-only queries** (``get_pid``, ``get_brake_status``,
+          ``get_force_torque_sensor_mode``, ``get_ee_baud_rate``) raise
+          ``ServiceUnavailableError`` on timeout because callers depend on the
+          returned data and cannot proceed without it.
+        - **Write operations** (``set_pid``, ``set_ee_baud_rate``, ``release_brake``,
+          ``activate_force_torque_sensor``) return a ``{"success": False, ...}``
+          fallback dict on timeout so callers can handle failure gracefully without
+          catching exceptions in interactive scripts.
 
     Attributes:
         mode_querier: Zenoh querier for setting arm mode.
@@ -96,7 +106,7 @@ class Arm(RobotJointComponent):
         self._latest_ee_pass_through_data: dict[str, Any] | None = None
         if self.enable_ee_pass_through:
             self._ee_pass_through_publisher = self._node.create_publisher(
-                topic=resolve_key_name(config.ee_pass_through_pub_topic),
+                topic=config.ee_pass_through_pub_topic,
                 encoder=EEPassThroughCmdCodec.encode,
             )
             # Subscribe to EE pass-through response topic
@@ -124,6 +134,14 @@ class Arm(RobotJointComponent):
         # Brake release service client
         self._brake_querier = self._node.create_service_client(
             service_name=config.brake_query,
+            request_encoder=DictDataCodec.encode,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
+        )
+
+        # Force torque sensor mode service client
+        self._force_torque_sensor_querier = self._node.create_service_client(
+            service_name=config.force_torque_sensor_query,
             request_encoder=DictDataCodec.encode,
             response_decoder=DictDataCodec.decode,
             timeout=5.0,
@@ -378,33 +396,48 @@ class Arm(RobotJointComponent):
     def set_pid(
         self,
         p_multipliers: list[float],
-        i_multipliers: list[float] = [],
-        d_multipliers: list[float] = [],
+        i_multipliers: list[float] | None = None,
+        d_multipliers: list[float] | None = None,
     ) -> dict[str, Any]:
         """Set PID P-gain multipliers for the arm joints.
 
         This sets the position P-gain multipliers for all 7 arm joints.
         The multipliers are applied to the factory default PID values.
-        Currently, only the modification of P value is supported
+        Currently, only the modification of P value is supported.
+
+        Each multiplier must be in the range [0.1, 4]. Values outside this
+        range are not permitted for safety reasons — higher values increase joint
+        stiffness, which generates larger forces on collision.
 
         Args:
             p_multipliers: List of 7 P-gain multipliers, one for each joint.
+                Range: [0.1, 4] per joint.
 
         Returns:
             Dictionary with 'success' (bool), 'p' (list), and 'message' (str).
 
         Raises:
-            RuntimeError: If the service is not available or the operation fails.
+            ValueError: If multipliers are not exactly 7 values or out of range [0.1, 4].
+            ServiceUnavailableError: If the service is not available or the operation fails.
         """
-        if i_multipliers != [] or d_multipliers != []:
+        if i_multipliers is not None or d_multipliers is not None:
             logger.warning("Only the modification of P value is supported for now")
         del i_multipliers, d_multipliers
 
         if len(p_multipliers) != 7:
             raise ValueError("p_multipliers must have exactly 7 values (one per joint)")
 
+        for i, val in enumerate(p_multipliers):
+            if not (0.1 <= val <= 4.0):
+                raise ValueError(
+                    f"p_multipliers[{i}]={val} is out of range. "
+                    "Values must be in [0.1, 4] for safety."
+                )
+
         if not self._pid_querier.wait_for_service(timeout=5.0):
-            raise RuntimeError(f"PID service not available for {self._side} arm")
+            raise ServiceUnavailableError(
+                f"PID service not available for {self._side} arm"
+            )
 
         query_msg = {"p": p_multipliers}
 
@@ -417,7 +450,10 @@ class Arm(RobotJointComponent):
             response = self._pid_querier.call(query_msg, timeout=45.0)
 
         if response is None:
-            raise RuntimeError(f"Failed to set PID for {self._side} arm: no response")
+            response = {
+                "success": False,
+                "message": "Response time out from PID service",
+            }
         return response
 
     def get_pid(self) -> dict[str, Any]:
@@ -427,17 +463,18 @@ class Arm(RobotJointComponent):
             Dictionary with 'success' (bool), 'p' (list of 7 multipliers), and 'message' (str).
 
         Raises:
-            RuntimeError: If the service is not available or the operation fails.
+            ServiceUnavailableError: If the service is not available or the operation fails.
         """
         if not self._pid_querier.wait_for_service(timeout=5.0):
-            raise RuntimeError(f"PID service not available for {self._side} arm")
+            raise ServiceUnavailableError(
+                f"PID service not available for {self._side} arm"
+            )
 
         response = self._pid_querier.call({})
         if response is None:
-            response = {
-                "success": False,
-                "message": "Response time out from PID service",
-            }
+            raise ServiceUnavailableError(
+                f"Failed to get PID for {self._side} arm: no response"
+            )
         return response
 
     def release_brake(
@@ -457,10 +494,12 @@ class Arm(RobotJointComponent):
             Dictionary with 'success' (bool) and 'message' (str).
 
         Raises:
-            RuntimeError: If the service is not available or the operation fails.
+            ServiceUnavailableError: If the service is not available or the operation fails.
         """
         if not self._brake_querier.wait_for_service(timeout=5.0):
-            raise RuntimeError(f"Brake service not available for {self._side} arm")
+            raise ServiceUnavailableError(
+                f"Brake service not available for {self._side} arm"
+            )
 
         query_msg: dict[str, Any] = {"enable": enable}
         if joints is not None:
@@ -491,15 +530,82 @@ class Arm(RobotJointComponent):
                 - 'message' (str): Status message
 
         Raises:
-            RuntimeError: If the service is not available or the operation fails.
+            ServiceUnavailableError: If the service is not available or the operation fails.
         """
         if not self._brake_querier.wait_for_service(timeout=5.0):
-            raise RuntimeError(f"Brake service not available for {self._side} arm")
+            raise ServiceUnavailableError(
+                f"Brake service not available for {self._side} arm"
+            )
 
         response = self._brake_querier.call({})
         if response is None:
-            raise RuntimeError(
+            raise ServiceUnavailableError(
                 f"Failed to get brake status for {self._side} arm: no response"
+            )
+        return response
+
+    def activate_force_torque_sensor(self, enable: bool) -> dict[str, Any]:
+        """Enable or disable force torque sensor mode for the arm.
+
+        When enabled, all 7 joints are set to mode 0 (non-joint mode, requires
+        6-axis force sensor connected). When disabled, all joints are set to
+        mode 1 (joint mode, operates without force sensor).
+
+        This operation requires factory mode and takes ~20 seconds.
+
+        Args:
+            enable: True to enable force torque sensor (joint mode 0),
+                False to disable (joint mode 1).
+
+        Returns:
+            Dictionary with 'success' (bool) and 'message' (str).
+
+        Raises:
+            ServiceUnavailableError: If the service is not available or the operation fails.
+        """
+        if not self._force_torque_sensor_querier.wait_for_service(timeout=5.0):
+            raise ServiceUnavailableError(
+                f"Force torque sensor service not available for {self._side} arm"
+            )
+
+        query_msg: dict[str, Any] = {"enable": enable}
+
+        action = "Enabling" if enable else "Disabling"
+        console = Console()
+        with console.status(
+            f"[bold green]{action} force torque sensor for {self._side} arm (~20 seconds)..."
+        ):
+            response = self._force_torque_sensor_querier.call(query_msg, timeout=45.0)
+
+        if response is None:
+            response = {
+                "success": False,
+                "message": "Response time out from force torque sensor service",
+            }
+        return response
+
+    def get_force_torque_sensor_mode(self) -> dict[str, Any]:
+        """Get current force torque sensor mode for the arm.
+
+        Returns:
+            Dictionary with:
+                - 'success' (bool): Whether the query succeeded
+                - 'enabled' (bool): Whether force torque sensor is enabled (all joints mode 0)
+                - 'modes' (list[int]): Current joint modes for all 7 joints
+                - 'message' (str): Status message
+
+        Raises:
+            ServiceUnavailableError: If the service is not available or the operation fails.
+        """
+        if not self._force_torque_sensor_querier.wait_for_service(timeout=5.0):
+            raise ServiceUnavailableError(
+                f"Force torque sensor service not available for {self._side} arm"
+            )
+
+        response = self._force_torque_sensor_querier.call({})
+        if response is None:
+            raise ServiceUnavailableError(
+                f"Failed to get force torque sensor mode for {self._side} arm: no response"
             )
         return response
 
@@ -513,19 +619,20 @@ class Arm(RobotJointComponent):
             Dictionary with 'success' (bool), 'baud_rate' (int), and 'message' (str).
 
         Raises:
-            RuntimeError: If the service is not available or the operation fails.
+            ServiceUnavailableError: If the service is not available or the operation fails.
         """
         if not self._ee_baud_rate_querier.wait_for_service(timeout=5.0):
-            raise RuntimeError(
+            raise ServiceUnavailableError(
                 f"EE baud rate service not available for {self._side} arm"
             )
 
         query_msg = {"baud_rate": baud_rate}
         response = self._ee_baud_rate_querier.call(query_msg)
         if response is None:
-            raise RuntimeError(
-                f"Failed to set EE baud rate for {self._side} arm: no response"
-            )
+            response = {
+                "success": False,
+                "message": "Response time out from EE baud rate service",
+            }
         return response
 
     def get_ee_baud_rate(self) -> dict[str, Any]:
@@ -535,16 +642,16 @@ class Arm(RobotJointComponent):
             Dictionary with 'success' (bool), 'baud_rate' (int), and 'message' (str).
 
         Raises:
-            RuntimeError: If the service is not available or the operation fails.
+            ServiceUnavailableError: If the service is not available or the operation fails.
         """
         if not self._ee_baud_rate_querier.wait_for_service(timeout=5.0):
-            raise RuntimeError(
+            raise ServiceUnavailableError(
                 f"EE baud rate service not available for {self._side} arm"
             )
 
         response = self._ee_baud_rate_querier.call({})
         if response is None:
-            raise RuntimeError(
+            raise ServiceUnavailableError(
                 f"Failed to get EE baud rate for {self._side} arm: no response"
             )
         return response
@@ -578,7 +685,7 @@ class Arm(RobotJointComponent):
         Args:
             message: The raw bytes message to send to the end effector via RS485.
         """
-        self._ee_pass_through_publisher.publish(message)
+        self._ee_pass_through_publisher.publish({"data": message})
 
     def _on_ee_pass_through_update(self, data: dict[str, Any]) -> None:
         """Handle incoming EE pass-through response updates.

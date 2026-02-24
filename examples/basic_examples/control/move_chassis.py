@@ -26,8 +26,10 @@ import tyro
 from loguru import logger
 
 from dexcontrol.robot import Robot
+from dexcontrol.utils.compat import supported_models
 
 
+@supported_models("vega_1", "vega_1p")
 def main(
     speed: float = 0.2,
     duration: float = 4.0,
@@ -53,9 +55,6 @@ def main(
         return
 
     with Robot() as bot:
-        if bot.robot_model == "vega_1u":
-            logger.error("Invalid operation: Vega 1U does not have a chassis")
-            return
         chassis = bot.chassis
 
         # Forward and backward movement

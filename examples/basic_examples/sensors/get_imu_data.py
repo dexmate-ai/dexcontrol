@@ -8,10 +8,10 @@
 # 2. Commercial License
 #    For commercial licensing terms, contact: contact@dexmate.ai
 
-"""Example script to read IMU data live in a nice table.
+"""Example script to read chassis and head IMU data live in a nice table.
 
 This script demonstrates how to retrieve inertial measurement data from the robot's
-base and head IMU sensors and display them live in a formatted table. It continuously
+chassis and head IMU sensors and display them live in a formatted table. It continuously
 reads IMU data including acceleration, angular velocity, magnetometer, and orientation,
 and displays the information in real-time tables.
 """
@@ -40,16 +40,19 @@ def get_imu_data(robot):
         robot: Robot instance
 
     Returns:
-        tuple: (head_imu_data, base_imu_data)
+        tuple: (head_imu_data, chassis_imu_data)
     """
-    # Get all IMU data including magnetometer if available
-    head_imu_data = robot.sensors.head_imu.get_obs(
-        obs_keys=["acc", "gyro", "quat", "mag"]
-    )
-    base_imu_data = robot.sensors.base_imu.get_obs(
-        obs_keys=["acc", "gyro", "quat", "mag"]
-    )
-    return head_imu_data, base_imu_data
+    head_imu_data = None
+    chassis_imu_data = None
+    if robot.has_sensor("head_imu"):
+        head_imu_data = robot.sensors.head_imu.get_obs(
+            obs_keys=["acc", "gyro", "quat", "mag"]
+        )
+    if robot.has_sensor("chassis_imu"):
+        chassis_imu_data = robot.sensors.chassis_imu.get_obs(
+            obs_keys=["acc", "gyro", "quat", "mag"]
+        )
+    return head_imu_data, chassis_imu_data
 
 
 def create_imu_table(imu_data, title):
@@ -127,7 +130,7 @@ def display_live_imu_data(robot, fps: float = 100.0):
     initial_layout.split_column(
         Layout(Panel("Initializing...", title="Status"), size=3),
         Layout(create_imu_table(None, "[bold cyan]Head IMU Data[/bold cyan]")),
-        Layout(create_imu_table(None, "[bold yellow]Base IMU Data[/bold yellow]")),
+        Layout(create_imu_table(None, "[bold yellow]Chassis IMU Data[/bold yellow]")),
     )
 
     rate_limiter = RateLimiter(fps)
@@ -144,7 +147,7 @@ def display_live_imu_data(robot, fps: float = 100.0):
                 )
 
                 # Get IMU data using our simple API
-                head_imu_data, base_imu_data = get_imu_data(robot)
+                head_imu_data, chassis_imu_data = get_imu_data(robot)
 
                 # Create updated display
                 status_panel = Panel(
@@ -163,7 +166,8 @@ def display_live_imu_data(robot, fps: float = 100.0):
                     ),
                     Layout(
                         create_imu_table(
-                            base_imu_data, "[bold yellow]Base IMU Data[/bold yellow]"
+                            chassis_imu_data,
+                            "[bold yellow]Chassis IMU Data[/bold yellow]",
                         )
                     ),
                 )
@@ -181,27 +185,36 @@ def main(fps: float = 100.0):
     Args:
         fps: Display update rate in Hz (default: 100.0)
     """
-    # Initialize robot with IMU sensors enabled
+    # Initialize robot with available IMU sensors enabled
     configs = get_robot_config()
-    configs.sensors["head_imu"].enabled = True
-    configs.sensors["base_imu"].enabled = True
+    has_head_imu = configs.has_sensor("head_imu")
+    has_chassis_imu = configs.has_sensor("chassis_imu")
+
+    if not has_head_imu and not has_chassis_imu:
+        print("No IMU sensors available on this robot configuration.")
+        return
+
+    if has_head_imu:
+        configs.enable_sensor("head_imu")
+    if has_chassis_imu:
+        configs.enable_sensor("chassis_imu")
 
     with Robot(configs=configs) as robot:
-        # Wait for IMU sensors to become active
         print("Waiting for IMU sensors to become active...")
-        head_active = robot.sensors.head_imu.wait_for_active(timeout=5.0)
-        base_active = robot.sensors.base_imu.wait_for_active(timeout=5.0)
 
-        if not head_active:
-            print("Warning: Head IMU not active")
-        if not base_active:
-            print("Warning: Base IMU not active")
+        if has_head_imu:
+            if robot.sensors.head_imu.wait_for_active(timeout=5.0):
+                if robot.sensors.head_imu.has_mag():
+                    print("Head IMU has magnetometer data available")
+            else:
+                print("Warning: Head IMU not active")
 
-        # Check if magnetometer is available
-        if head_active and robot.sensors.head_imu.has_mag():
-            print("Head IMU has magnetometer data available")
-        if base_active and robot.sensors.base_imu.has_mag():
-            print("Base IMU has magnetometer data available")
+        if has_chassis_imu:
+            if robot.sensors.chassis_imu.wait_for_active(timeout=5.0):
+                if robot.sensors.chassis_imu.has_mag():
+                    print("Chassis IMU has magnetometer data available")
+            else:
+                print("Warning: Chassis IMU not active")
 
         display_live_imu_data(robot, fps)
 

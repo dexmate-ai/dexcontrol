@@ -24,8 +24,8 @@ from typing import Any
 import numpy as np
 from loguru import logger
 
+from dexcontrol.exceptions import ConfigurationError
 from dexcontrol.utils.comm_helper import query_json_service
-from dexcontrol.utils.os_utils import resolve_key_name
 
 # WebRTC dependencies
 try:
@@ -33,9 +33,6 @@ try:
 
     WEBRTC_AVAILABLE = True
 except ImportError:
-    logger.warning(
-        "WebRTC dependencies not available. Install: pip install aiortc websockets"
-    )
     websockets = None
     WEBRTC_AVAILABLE = False
 
@@ -109,8 +106,10 @@ class RTCSubscriber:
     def _initialize(self) -> None:
         """Initialize WebRTC connection."""
         if not WEBRTC_AVAILABLE:
-            logger.error(f"{self.name}: WebRTC dependencies not available")
-            return
+            raise ConfigurationError(
+                f"WebRTC dependencies not available for '{self.name}'. "
+                "Install: pip install aiortc websockets"
+            )
 
         # Use direct signaling URL if provided, otherwise query for it
         if self.signaling_url:
@@ -130,10 +129,9 @@ class RTCSubscriber:
 
     def _query_connection_info(self) -> dict[str, Any] | None:
         """Query for WebRTC connection information."""
-        full_topic = resolve_key_name(self.topic)
-        logger.debug(f"{self.name}: Querying {full_topic}")
+        logger.debug(f"{self.name}: Querying {self.topic}")
 
-        info = query_json_service(topic=full_topic, timeout=2.0)
+        info = query_json_service(topic=self.topic, timeout=2.0)
 
         if info and "signaling_url" in info:
             logger.info(f"{self.name}: Got connection info")

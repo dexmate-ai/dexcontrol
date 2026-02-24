@@ -2,6 +2,63 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.4] - 2026-02-18
+
+### Fixed
+
+- **Double-namespaced Zenoh topics in RTC and Arm.** `RTCSubscriber._query_connection_info()` was calling `resolve_key_name()` before passing the topic to `query_json_service()`, which already applies `resolve_key_name()` internally — resulting in the robot name prefix being added twice. Similarly, `Arm` was wrapping `config.ee_pass_through_pub_topic` with `resolve_key_name()` before passing it to `create_publisher()`, which handles namespace resolution at the communication layer. Both call sites now pass the raw topic directly.
+
+## [0.4.3] - 2026-02-17
+
+### Added
+
+- **Robot model compatibility decorators.** New `supported_models` decorator for example scripts and `requires_model` decorator for class methods, both in `dexcontrol.utils.compat`. Scripts decorated with `@supported_models` check the robot model from environment variables before running and exit with a clear error if the model is unsupported — avoiding unnecessary robot connections. Methods decorated with `@requires_model` raise `ModelNotSupportedError` at call time.
+- **`ModelNotSupportedError` exception.** New exception type raised when a method or script is called on an unsupported robot model. Includes `method`, `robot_model`, and `supported_models` attributes for programmatic handling.
+- **Model annotations on examples.** Examples that require specific hardware (chassis, torso, ultrasonic sensors, chassis cameras) are now annotated with `@supported_models` to prevent confusing errors when run on incompatible robot variants.
+
+### Fixed
+
+- **EE pass-through publish format.** `Arm.send_ee_pass_through_message()` now wraps the message bytes in the expected `{"data": message}` dict format.
+
+### Breaking Changes
+
+- **Removed `variant` parameter from `Robot` constructor.** The robot variant is now always resolved automatically from the `ROBOT_NAME` environment variable. To use a custom configuration, pass `configs=` directly. Callers using `Robot(variant=...)` must remove the argument and rely on the `ROBOT_NAME` environment variable instead, or pass a config object via `Robot(configs=...)`.
+
+### Changed
+
+- **`robot_model` property now returns the base model.** `Robot.robot_model` is derived from `RobotInfo` and returns the core platform type (e.g., `"vega_1"`, `"vega_1p"`, `"vega_1u"`) without hand/config suffixes.
+
+## [0.4.2] - 2026-02-15
+
+### Added
+
+- **Force torque sensor control.** New `activate_force_torque_sensor()` and `get_force_torque_sensor_mode()` methods on `Arm`.
+- **PID safety validation.** `set_pid` now rejects P-gain multipliers outside [0.1, 4].
+- **Arm tracking benchmark examples** (sine wave and step response) for comparing PID settings.
+- **New exception types for component/sensor access.** `ComponentNotAvailableError` raised when accessing unavailable robot components (with helpful message suggesting `has_component()` check). `SensorNotAvailableError` raised when accessing unavailable sensors (suggests `has_sensor()` check).
+
+### Fixed
+
+- **Config overwrite bug.** User-provided `configs` passed to `Robot()` were silently ignored because `RobotInfo` was always constructing its own default config. `Robot` now passes `configs` directly to `RobotInfo`, and when both `robot_model` and `configs` are provided, `configs` takes priority with a warning logged.
+
+### Changed
+
+- **Replaced `RuntimeError` with dexcontrol-specific exceptions throughout.** Arm service methods raise `ServiceUnavailableError`, robot-level methods raise `DexcontrolError`, and component activation raises `ComponentError`.
+- **Consistent error handling for service calls.** Read-only queries (`get_pid`, `get_brake_status`, `get_force_torque_sensor_mode`, `get_ee_baud_rate`) raise `ServiceUnavailableError` on timeout. Write operations (`set_pid`, `set_ee_baud_rate`, `release_brake`, `activate_force_torque_sensor`, `DexGripper.set_mode`) return `{"success": False, ...}` fallback dict on timeout.
+- **Examples use `has_component()` method** instead of direct attribute checks.
+- **`get_robot_config()` now uses `RobotInfo.get_default_config`** instead of instantiating a full `RobotInfo` object, avoiding unnecessary URDF loading.
+- **Replay trajectory example** now warns about potential end effector collisions with pre-existing trajectories.
+- **Renamed sensor examples for clarity.** `get_lidar_data.py` → `get_2d_lidar_data.py`, `get_head_cam_data.py` → `get_head_zed_x_mini_data.py`, `get_live_lidar_data.py` → `get_live_2d_lidar_data.py`, `get_wrist_camera_data.py` → `get_wrist_zed_x_one_data.py`.
+
+### Dependencies
+
+- Requires `dexcomm >= 0.4.2`.
+- Requires `dexbot-utils >= 0.4.3`.
+
+### Version Requirements
+
+- **SOC Minimal Version**: 419 (raised from 360).
+
 ## [0.4.1] - 2026-02-10
 
 ### Performance Improvements

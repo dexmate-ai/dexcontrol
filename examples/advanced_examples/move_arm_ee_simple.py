@@ -51,13 +51,13 @@ def main() -> None:
     # Initialize robot and get current joint positions
     bot = Robot()
     control_hz = 250
-    if bot.robot_model == "vega_1u":
+    if bot.has_component("torso"):
         initial_joint_pos = bot.get_joint_pos_dict(
-            component=["left_arm", "right_arm", "head"]
+            component=["left_arm", "right_arm", "torso", "head"]
         )
     else:
         initial_joint_pos = bot.get_joint_pos_dict(
-            component=["left_arm", "right_arm", "torso", "head"]
+            component=["left_arm", "right_arm", "head"]
         )
 
     # Create task instance with initial joint configuration
