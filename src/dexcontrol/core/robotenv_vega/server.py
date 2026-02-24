@@ -489,11 +489,8 @@ def serve(
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     robotenv_pb2_grpc.add_RobotEnvServicer_to_server(service, server)
 
-    server_address = f"[::1]:{grpc_port}"
-    port = server.add_insecure_port(server_address)
-    if port == 0:
-        server_address = f"127.0.0.1:{grpc_port}"
-        server.add_insecure_port(server_address)
+    server_address = f"0.0.0.0:{grpc_port}"
+    server.add_insecure_port(server_address)
 
     server.start()
     LOGGER.info(
