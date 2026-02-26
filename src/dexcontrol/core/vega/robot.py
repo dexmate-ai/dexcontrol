@@ -198,8 +198,8 @@ class VegaRobot:
                         "torso_j3": 30000.0,
                         "R_arm_j2": 100,
                         "L_arm_j2": 100,
-                        "R_arm_j4": 50.0,
-                        "L_arm_j4": 50.0,
+                        "R_arm_j3": 50.0,
+                        "L_arm_j3": 50.0,
                     },
                 ),
             )
