@@ -30,7 +30,7 @@ from loguru import logger
 # Ensure the submodule takes precedence over any namespace package with the
 # same name that may shadow it (e.g. when /home/dexmate/robotiq_2f_85_controller
 # is not on sys.path but a .pth editable install points elsewhere).
-_SUBMODULE = Path(__file__).resolve().parents[4] / "robotiq_2f_85_controller"
+_SUBMODULE = Path(__file__).resolve().parents[3] / "robotiq_2f_85_controller"
 if _SUBMODULE.exists() and str(_SUBMODULE) not in sys.path:
     sys.path.insert(0, str(_SUBMODULE))
 
