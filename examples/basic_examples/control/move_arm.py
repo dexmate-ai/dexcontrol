@@ -25,7 +25,7 @@ from dexcontrol.robot import Robot
 
 
 def main(
-    arm_side: Literal["right", "left"] = "right",
+    arm_side: Literal["right", "left"] = "left",
     step_size: float = 0.2,
 ) -> None:
     """Executes a sequence of arm movements to demonstrate joint control.
