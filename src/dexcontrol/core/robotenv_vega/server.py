@@ -25,6 +25,15 @@ def _dlog(loc, msg, data=None, hyp="", run=""):
     except Exception:
         pass
 # #endregion
+# #region agent log
+_DBG_LOG_AC = "/home/dexmate/.cursor/debug-ac3810.log"
+def _dlog_ac(loc, msg, data=None, hyp="", run=""):
+    try:
+        with open(_DBG_LOG_AC, "a") as f:
+            f.write(_json.dumps({"sessionId":"ac3810","location":loc,"message":msg,"data":{k:(v.tolist() if hasattr(v,"tolist") else v) for k,v in (data or {}).items()},"hypothesisId":hyp,"runId":run,"timestamp":int(time.time()*1000)})+"\n")
+    except Exception:
+        pass
+# #endregion
 
 # Add package root for local imports.
 # server.py lives at: <repo>/src/dexcontrol/core/robotenv_vega/server.py
@@ -55,9 +64,11 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         gripper_type: str = "default",
         frame_type: str = "vega_mobile_base",
         control_hz: int = 20,
+        use_velocity_feedforward: bool = False,
         base_frame_rotation: Optional[list[float]] = None,
         ik_solver_type: str = "pink",
         robotiq_comport: str = "/dev/ttyUSB0",
+        ema_alpha: float = 0.0,
         **kwargs,
     ):
         hand_type = kwargs.pop("hand_type", None)
@@ -72,6 +83,7 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         self.gripper_type = gripper_type
         self.frame_type = frame_type
         self.control_hz = int(control_hz)
+        self.use_velocity_feedforward = bool(use_velocity_feedforward)
         self.base_frame_rotation = base_frame_rotation
         self._max_lin_delta, self._max_rot_delta = self._compute_cartesian_delta_limits(self.control_hz)
 
@@ -79,9 +91,11 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
             robot_model=robot_model,
             arm_side=arm_side,
             control_hz=control_hz,
+            use_velocity_feedforward=use_velocity_feedforward,
             gripper_type=gripper_type,
             ik_solver_type=ik_solver_type,
             robotiq_comport=robotiq_comport,
+            ema_alpha=ema_alpha,
         )
         self._robot.launch_robot()
 
@@ -105,9 +119,18 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
             control_hz,
         )
         LOGGER.info(
+            "Joint command mode: %s",
+            "position+velocity feedforward" if self.use_velocity_feedforward else "position-only",
+        )
+        LOGGER.info(
             "Cartesian velocity normalization enabled: max_lin_delta=%.6f max_rot_delta=%.6f",
             self._max_lin_delta,
             self._max_rot_delta,
+        )
+        LOGGER.info(
+            "EMA smoothing: %s (alpha=%.3f)",
+            "enabled" if ema_alpha > 0 else "disabled",
+            ema_alpha,
         )
 
     @staticmethod
@@ -324,10 +347,9 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         try:
             # -- gripper debug --
             if self._robot.hand is not None:
-                _cur_grip_raw = float(self._robot.hand.get_joint_pos()[0])
-                _cur_grip_norm = self._robot._normalize_gripper_position(
-                    np.asarray(self._robot.hand.get_joint_pos(), dtype=np.float64)
-                )
+                _cur_grip_joint = self._robot.get_cached_gripper_joint_pos()
+                _cur_grip_raw = float(_cur_grip_joint[0]) if _cur_grip_joint.size > 0 else 0.0
+                _cur_grip_norm = float(self._robot.get_cached_gripper_position())
             else:
                 _cur_grip_raw = 0.0
                 _cur_grip_norm = 0.0
@@ -348,14 +370,27 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
                 action = self._transform_action_to_robot_frame(action)
             if action_space == "cartesian_velocity":
                 raw_action = action.copy()
+                raw_lin_norm = float(np.linalg.norm(raw_action[:3]))
+                raw_rot_norm = float(np.linalg.norm(raw_action[3:6]))
                 action = self._cartesian_velocity_to_delta(action)
                 action_space_for_robot = "cartesian_delta"
+                delta_lin_norm = float(np.linalg.norm(action[:3]))
+                delta_rot_norm = float(np.linalg.norm(action[3:6]))
+                pct_lin = 100.0 * delta_lin_norm / self._max_lin_delta if self._max_lin_delta > 0 else 0.0
+                pct_rot = 100.0 * delta_rot_norm / self._max_rot_delta if self._max_rot_delta > 0 else 0.0
+                # #region agent log
+                _dlog_ac("server.py:Step", "vel_to_delta", {
+                    "raw_lin_norm": raw_lin_norm, "raw_rot_norm": raw_rot_norm,
+                    "delta_lin_norm": delta_lin_norm, "delta_rot_norm": delta_rot_norm,
+                    "max_lin_delta": self._max_lin_delta, "max_rot_delta": self._max_rot_delta,
+                    "pct_of_lin_range": round(pct_lin, 2), "pct_of_rot_range": round(pct_rot, 2),
+                    "raw_xyz": raw_action[:3].tolist(), "raw_rpy": raw_action[3:6].tolist(),
+                    "delta_xyz": action[:3].tolist(), "delta_rpy": action[3:6].tolist(),
+                }, hyp="vel_delta_analysis")
+                # #endregion
                 LOGGER.info(
                     "Converted cartesian_velocity -> cartesian_delta: lin_norm=%.4f rot_norm=%.4f max_lin_delta=%.6f max_rot_delta=%.6f",
-                    float(np.linalg.norm(raw_action[:3])),
-                    float(np.linalg.norm(raw_action[3:6])),
-                    self._max_lin_delta,
-                    self._max_rot_delta,
+                    raw_lin_norm, raw_rot_norm, self._max_lin_delta, self._max_rot_delta,
                 )
             # #region agent log
             t_after_xform = time.time()
@@ -502,8 +537,10 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         _dlog("server.py:reset_seq","reset_start",{"target":target_joints,"actual_before":actual_before,"arm_side":self.arm_side},hyp="H1A,H1B,H1C")
         # #endregion
         self._robot.update_gripper(0.0, velocity=False, blocking=True)
+        self._robot._ema_prev_qpos = None  # Reset EMA state before reset motion
         target_f64 = np.asarray(target_joints, dtype=np.float64)
         self._move_incremental(target_f64)
+        self._robot._ema_prev_qpos = None  # Reset EMA state after reaching target
         self._robot.sync_motion_manager_with_arm(
             np.asarray(self._robot.arm.get_joint_pos(), dtype=np.float64)
         )
@@ -613,9 +650,11 @@ def serve(
     gripper_type: str = "default",
     frame_type: str = "vega_mobile_base",
     control_hz: int = 20,
+    use_velocity_feedforward: bool = False,
     base_frame_rotation: Optional[list[float]] = None,
     ik_solver_type: str = "pink",
     robotiq_comport: str = "/dev/ttyUSB0",
+    ema_alpha: float = 0.0,
     **kwargs,
 ) -> None:
     """Start Vega RobotEnv gRPC server."""
@@ -637,9 +676,11 @@ def serve(
         gripper_type=gripper_type,
         frame_type=frame_type,
         control_hz=control_hz,
+        use_velocity_feedforward=use_velocity_feedforward,
         base_frame_rotation=base_frame_rotation,
         ik_solver_type=ik_solver_type,
         robotiq_comport=robotiq_comport,
+        ema_alpha=ema_alpha,
     )
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
@@ -708,6 +749,11 @@ def main() -> None:
     )
     parser.add_argument("--control-hz", type=int, default=20, help="Control frequency in Hz")
     parser.add_argument(
+        "--use-velocity-feedforward",
+        action="store_true",
+        help="Send joint position and velocity feedforward together (pos+vel) instead of position-only arm commands",
+    )
+    parser.add_argument(
         "--base-frame-rotation",
         type=float,
         nargs=3,
@@ -728,6 +774,13 @@ def main() -> None:
         default="/dev/ttyUSB0",
         help="Serial port for Robotiq gripper when --gripper-type=robotiq (default: /dev/ttyUSB0)",
     )
+    parser.add_argument(
+        "--ema-alpha",
+        type=float,
+        default=0.0,
+        help="EMA smoothing factor for joint commands (0.0=disabled, 0.05~0.3=typical). "
+             "Lower values = smoother but more latency (default: 0.0)",
+    )
     args = parser.parse_args()
 
     serve(
@@ -737,13 +790,14 @@ def main() -> None:
         gripper_type=args.gripper_type,
         frame_type=args.frame_type,
         control_hz=args.control_hz,
+        use_velocity_feedforward=args.use_velocity_feedforward,
         base_frame_rotation=args.base_frame_rotation,
         ik_solver_type=args.ik_solver,
         robotiq_comport=args.robotiq_comport,
+        ema_alpha=args.ema_alpha,
     )
 
 
 if __name__ == "__main__":
     main()
-
     main()

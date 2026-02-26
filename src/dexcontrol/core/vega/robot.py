@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json as _json
 import sys
+import threading
 import time as _time
+from queue import Empty, Full, Queue
 from pathlib import Path
 from typing import Any, Optional
 
@@ -94,7 +96,9 @@ class VegaRobot:
         control_hz: int = 20,
         gripper_type: str = "default",
         ik_solver_type: str = "pink",
+        use_velocity_feedforward: bool = False,
         robotiq_comport: str = "/dev/ttyUSB0",
+        ema_alpha: float = 0.0,
         **kwargs,
     ):
         hand_type = kwargs.pop("hand_type", None)
@@ -121,6 +125,7 @@ class VegaRobot:
         self.arm_side = arm_side
         self.control_hz = int(control_hz)
         self.gripper_type = gripper_type
+        self.use_velocity_feedforward = bool(use_velocity_feedforward)
 
         configs = get_robot_config(robot_model)
         self.robot = Robot(configs=configs)
@@ -148,9 +153,27 @@ class VegaRobot:
         self.safe_transit_pose = self.reset_joints.copy()
 
         self._gripper_open_pos, self._gripper_close_pos = self._init_gripper_reference()
+        self._gripper_state_lock = threading.Lock()
+        self._gripper_io_lock = threading.Lock()
+        self._gripper_poll_interval_s = 1.0 / max(1, self.control_hz)
+        self._gripper_position = 0.0
+        self._gripper_joint_pos = np.asarray(self._gripper_open_pos, dtype=np.float64).copy()
+        self._gripper_command_queue: Queue[float] | None = None
+        self._gripper_stop_event = threading.Event()
+        self._gripper_worker: threading.Thread | None = None
         self._prev_command_successful = True
         self._prev_gripper_command_successful = True
         self._prev_controller_latency_ms = 0.0
+        self._prev_joint_vel: np.ndarray | None = None
+        self._vel_smoothing_alpha = 0.3  # EMA factor: 0=fully smooth, 1=no smoothing
+
+        # EMA filter for joint position commands (0.0 = disabled, 0.05~0.3 = typical range)
+        self._ema_alpha = float(ema_alpha)
+        self._ema_prev_qpos: np.ndarray | None = None
+
+        if self.hand is not None:
+            self._refresh_gripper_state()
+            self._start_gripper_worker()
 
     def _build_ik_config(self):
         """Build an optimized IK config for real-time control."""
@@ -168,13 +191,15 @@ class VegaRobot:
                 qp_solver="proxqp",
                 safety_buffer=0.035,
                 damping_weights=IKDampingWeightsConfig(
-                    default=1e-12,
+                    default=1e-3,
                     override={
                         "torso_j1": 30000.0,
                         "torso_j2": 30000.0,
                         "torso_j3": 30000.0,
                         "R_arm_j2": 100,
                         "L_arm_j2": 100,
+                        "R_arm_j4": 50.0,
+                        "L_arm_j4": 50.0,
                     },
                 ),
             )
@@ -186,7 +211,138 @@ class VegaRobot:
         self.arm.set_modes(["position"] * 7)
         if self.arm.joint_pos_limit is None:
             raise RuntimeError("Arm joint position limits are unavailable")
+        self._ema_prev_qpos = None  # Reset EMA state on launch
         self.sync_motion_manager_with_arm(self.reset_joints)
+
+    def _start_gripper_worker(self) -> None:
+        if self.hand is None:
+            return
+        if self._gripper_worker is not None and self._gripper_worker.is_alive():
+            return
+        self._gripper_command_queue = Queue(maxsize=1)
+        self._gripper_stop_event.clear()
+        self._gripper_worker = threading.Thread(
+            target=self._gripper_worker_loop,
+            name=f"vega-gripper-{self.arm_side}",
+            daemon=True,
+        )
+        self._gripper_worker.start()
+
+    def _stop_gripper_worker(self) -> None:
+        self._gripper_stop_event.set()
+        if self._gripper_worker is not None and self._gripper_worker.is_alive():
+            self._gripper_worker.join(timeout=1.0)
+        self._gripper_worker = None
+        self._gripper_command_queue = None
+
+    def _gripper_worker_loop(self) -> None:
+        while not self._gripper_stop_event.is_set():
+            latest_target: float | None = None
+            if self._gripper_command_queue is not None:
+                try:
+                    latest_target = self._gripper_command_queue.get(
+                        timeout=self._gripper_poll_interval_s
+                    )
+                    while True:
+                        latest_target = self._gripper_command_queue.get_nowait()
+                except Empty:
+                    pass
+
+            if latest_target is not None:
+                self._execute_gripper_command(
+                    latest_target, wait_time=0.0, raise_on_error=False
+                )
+
+            self._refresh_gripper_state()
+
+    def _clear_gripper_command_queue(self) -> None:
+        if self._gripper_command_queue is None:
+            return
+        while True:
+            try:
+                self._gripper_command_queue.get_nowait()
+            except Empty:
+                return
+
+    def _gripper_target_to_joint_pos(self, target: float) -> np.ndarray:
+        return self._gripper_open_pos + target * (self._gripper_close_pos - self._gripper_open_pos)
+
+    def _refresh_gripper_state(self) -> bool:
+        if self.hand is None:
+            return False
+        try:
+            with self._gripper_io_lock:
+                hand_joint_pos = np.asarray(self.hand.get_joint_pos(), dtype=np.float64)
+            gripper_position = float(self._normalize_gripper_position(hand_joint_pos))
+            with self._gripper_state_lock:
+                self._gripper_joint_pos = hand_joint_pos.copy()
+                self._gripper_position = gripper_position
+            return True
+        except Exception:
+            self._prev_gripper_command_successful = False
+            return False
+
+    def _execute_gripper_command(
+        self,
+        target: float,
+        wait_time: float,
+        raise_on_error: bool,
+    ) -> bool:
+        if self.hand is None:
+            self._prev_gripper_command_successful = True
+            return True
+        target = float(np.clip(target, 0.0, 1.0))
+        target_joint_pos = self._gripper_target_to_joint_pos(target)
+        try:
+            with self._gripper_io_lock:
+                if target <= 1e-3:
+                    self.hand.open_hand(wait_time=wait_time)
+                elif target >= 1.0 - 1e-3:
+                    self.hand.close_hand(wait_time=wait_time)
+                else:
+                    self.hand.set_joint_pos(target_joint_pos, wait_time=wait_time)
+            with self._gripper_state_lock:
+                self._gripper_position = target
+                self._gripper_joint_pos = np.asarray(target_joint_pos, dtype=np.float64).copy()
+            self._prev_gripper_command_successful = True
+            return True
+        except Exception:
+            self._prev_gripper_command_successful = False
+            if raise_on_error:
+                raise
+            return False
+
+    def _enqueue_gripper_target(self, target: float) -> None:
+        target = float(np.clip(target, 0.0, 1.0))
+        with self._gripper_state_lock:
+            self._gripper_position = target
+            self._gripper_joint_pos = self._gripper_target_to_joint_pos(target)
+        if self._gripper_command_queue is None:
+            self._execute_gripper_command(target, wait_time=0.0, raise_on_error=False)
+            return
+        try:
+            self._gripper_command_queue.put_nowait(target)
+        except Full:
+            try:
+                self._gripper_command_queue.get_nowait()
+            except Empty:
+                pass
+            try:
+                self._gripper_command_queue.put_nowait(target)
+            except Full:
+                pass
+
+    def get_cached_gripper_position(self) -> float:
+        if self.hand is None:
+            return 0.0
+        with self._gripper_state_lock:
+            return float(self._gripper_position)
+
+    def get_cached_gripper_joint_pos(self) -> np.ndarray:
+        if self.hand is None:
+            return np.zeros(1, dtype=np.float64)
+        with self._gripper_state_lock:
+            return np.asarray(self._gripper_joint_pos, dtype=np.float64).copy()
 
     def update_command(
         self,
@@ -237,6 +393,17 @@ class VegaRobot:
         else:  # cartesian_delta
             target_joint_pos = self._solve_cartesian_delta(arm_action[:3], arm_action[3:6])
 
+        # Apply EMA smoothing to joint position command
+        if self._ema_alpha > 0.0:
+            if self._ema_prev_qpos is None:
+                self._ema_prev_qpos = target_joint_pos.copy()
+            else:
+                target_joint_pos = (
+                    self._ema_alpha * target_joint_pos
+                    + (1.0 - self._ema_alpha) * self._ema_prev_qpos
+                )
+                self._ema_prev_qpos = target_joint_pos.copy()
+
         # #region agent log
         _uc_t2 = _time.time()
         # #endregion
@@ -264,6 +431,8 @@ class VegaRobot:
 
     _MOTOR_MAX_DELTA_RAD = 0.25
 
+    _JOINT_LIMIT_TOLERANCE_RAD = 0.01  # ~0.57 deg tolerance for IK numerical precision
+
     def update_joints(
         self,
         joint_pos_command: np.ndarray,
@@ -279,6 +448,21 @@ class VegaRobot:
             current_joint_pos = np.asarray(self.arm.get_joint_pos(), dtype=np.float64)
             target_joint_pos = current_joint_pos + target_joint_pos * dt
 
+        # Clip small IK numerical errors within tolerance before hard validation
+        limits = self.arm.joint_pos_limit
+        if limits is not None:
+            low = limits[:, 0].astype(np.float64)
+            high = limits[:, 1].astype(np.float64)
+            tol = self._JOINT_LIMIT_TOLERANCE_RAD
+            target_joint_pos = np.where(
+                (target_joint_pos < low) & (target_joint_pos >= low - tol),
+                low, target_joint_pos,
+            )
+            target_joint_pos = np.where(
+                (target_joint_pos > high) & (target_joint_pos <= high + tol),
+                high, target_joint_pos,
+            )
+
         self.validate_joint_limits(target_joint_pos)
 
         current = np.asarray(self.arm.get_joint_pos(), dtype=np.float64)
@@ -290,18 +474,28 @@ class VegaRobot:
             # #region agent log
             _truncated = diff - clipped
             _per_joint_clipped = np.abs(diff) > self._MOTOR_MAX_DELTA_RAD
-            _dlog2("robot.py:update_joints", "clip_detail", {"step": _clip_step_counter[0], "max_diff_rad": max_diff, "max_diff_deg": float(np.rad2deg(max_diff)), "limit_rad": self._MOTOR_MAX_DELTA_RAD, "diff_before_rad": diff, "diff_after_rad": clipped, "truncated_rad": _truncated, "per_joint_clipped": _per_joint_clipped, "clipped_joint_indices": np.where(_per_joint_clipped)[0].tolist()}, hyp="H1_CLIP_FREQ,H2_JOINT_DIST,H3_DRIFT")
+            _dlog2("robot.py:update_joints", "clip_detail", {"step": _clip_step_counter[0], "max_diff_rad": max_diff, "max_diff_deg": float(np.rad2deg(max_diff)), "limit_rad": self._MOTOR_MAX_DELTA_RAD, "pct_of_motor_clip": round(100.0 * max_diff / self._MOTOR_MAX_DELTA_RAD, 2), "diff_before_rad": diff, "diff_after_rad": clipped, "truncated_rad": _truncated, "per_joint_clipped": _per_joint_clipped, "clipped_joint_indices": np.where(_per_joint_clipped)[0].tolist()}, hyp="H1_CLIP_FREQ,H2_JOINT_DIST,H3_DRIFT")
             # #endregion
             target_joint_pos = current + clipped
         else:
             # #region agent log
-            _dlog2("robot.py:update_joints", "no_clip", {"step": _clip_step_counter[0], "max_diff_rad": max_diff, "max_diff_deg": float(np.rad2deg(max_diff)), "limit_rad": self._MOTOR_MAX_DELTA_RAD}, hyp="H1_CLIP_FREQ")
+            _dlog2("robot.py:update_joints", "no_clip", {"step": _clip_step_counter[0], "max_diff_rad": max_diff, "max_diff_deg": float(np.rad2deg(max_diff)), "limit_rad": self._MOTOR_MAX_DELTA_RAD, "pct_of_motor_clip": round(100.0 * max_diff / self._MOTOR_MAX_DELTA_RAD, 2)}, hyp="H1_CLIP_FREQ")
             # #endregion
         # #region agent log
         _uj_t1 = _time.time()
         # #endregion
 
-        if blocking:
+        if self.use_velocity_feedforward and not blocking:
+            dt = 1.0 / max(1, self.control_hz)
+            raw_vel = (target_joint_pos - current) / dt
+            if self._prev_joint_vel is not None:
+                a = self._vel_smoothing_alpha
+                target_joint_vel = a * raw_vel + (1.0 - a) * self._prev_joint_vel
+            else:
+                target_joint_vel = raw_vel
+            self._prev_joint_vel = target_joint_vel.copy()
+            self.arm.set_joint_pos_vel(target_joint_pos, target_joint_vel, relative=False)
+        elif blocking:
             wait_time = 1.0 / max(1, self.control_hz)
             self.arm.set_joint_pos(target_joint_pos, wait_time=wait_time)
         else:
@@ -319,7 +513,7 @@ class VegaRobot:
         if self.hand is None:
             self._prev_gripper_command_successful = True
             return
-        current = self._normalize_gripper_position(np.asarray(self.hand.get_joint_pos(), dtype=np.float64))
+        current = self.get_cached_gripper_position()
         if velocity:
             target = current + float(command) * (1.0 / max(1, self.control_hz))
         else:
@@ -328,18 +522,14 @@ class VegaRobot:
         target = float(np.clip(target, 0.0, 1.0))
         wait_time = (1.0 / max(1, self.control_hz)) if blocking else 0.0
 
-        try:
-            if target <= 1e-3:
-                self.hand.open_hand(wait_time=wait_time)
-            elif target >= 1.0 - 1e-3:
-                self.hand.close_hand(wait_time=wait_time)
-            else:
-                target_joint_pos = self._gripper_open_pos + target * (self._gripper_close_pos - self._gripper_open_pos)
-                self.hand.set_joint_pos(target_joint_pos, wait_time=wait_time)
-            self._prev_gripper_command_successful = True
-        except Exception:
-            self._prev_gripper_command_successful = False
-            raise
+        if blocking:
+            self._clear_gripper_command_queue()
+            self._execute_gripper_command(target, wait_time=wait_time, raise_on_error=True)
+            self._refresh_gripper_state()
+            return
+
+        self._enqueue_gripper_target(target)
+        self._prev_gripper_command_successful = True
 
     def get_robot_state(self) -> tuple[dict[str, Any], dict[str, int]]:
         # #region agent log
@@ -354,11 +544,7 @@ class VegaRobot:
         # #region agent log
         _gs_t1 = _time.time()
         # #endregion
-        if self.hand is not None:
-            hand_joint_pos = np.asarray(self.hand.get_joint_pos(), dtype=np.float64)
-            gripper_position = float(self._normalize_gripper_position(hand_joint_pos))
-        else:
-            gripper_position = 0.0
+        gripper_position = self.get_cached_gripper_position() if self.hand is not None else 0.0
         # #region agent log
         _gs_t2 = _time.time()
         # #endregion
@@ -467,6 +653,12 @@ class VegaRobot:
             for i, joint_name in enumerate(self._arm_joint_names):
                 if joint_name in qpos_dict:
                     qpos_dict[joint_name] = float(arm_joint_pos[i])
+            # Clip to joint limits so motion manager accepts the configuration
+            # even when the real arm is marginally outside limits (IK numerical error)
+            if robot_utils is not None:
+                qpos_dict = robot_utils.clip_joint_positions_to_limits(
+                    motion_manager.pin_robot, qpos_dict
+                )
             motion_manager.set_joint_pos(qpos_dict)
             # #region agent log
             mm_after_full = np.asarray(motion_manager.get_joint_pos(), dtype=np.float64)
@@ -704,6 +896,12 @@ class VegaRobot:
             pass
 
     def close(self) -> None:
+        self._stop_gripper_worker()
+        if self.gripper_type == "robotiq" and self.hand is not None:
+            try:
+                self.hand.shutdown()
+            except Exception:
+                pass
         try:
             self.robot.shutdown()
         except Exception:
