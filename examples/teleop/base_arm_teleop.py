@@ -173,9 +173,6 @@ class BaseIKController:
             ValueError: If an invalid arm side is specified.
             RuntimeError: If robot or IK solver is not initialized.
         """
-        # #region agent log
-        import time as _t; _ik_t0 = _t.time()
-        # #endregion
         if self.motion_manager.pin_robot is None:
             raise RuntimeError("Robot is not initialized")
         if self.motion_manager.local_ik_solver is None:
@@ -183,18 +180,12 @@ class BaseIKController:
 
         current_qpos = self.motion_manager.get_joint_pos()
         assert isinstance(current_qpos, np.ndarray)
-        # #region agent log
-        _ik_t1 = _t.time()
-        # #endregion
 
         ee_pose = self.motion_manager.fk(
             frame_names=self.motion_manager.target_frames,
             qpos=current_qpos,
             update_robot_state=False,
         )
-        # #region agent log
-        _ik_t2 = _t.time()
-        # #endregion
 
         left_ee_pose = ee_pose["L_ee"]
         right_ee_pose = ee_pose["R_ee"]
@@ -224,15 +215,9 @@ class BaseIKController:
                 f"Invalid arm side: {arm_side}. Must be 'left' or 'right'."
             )
 
-        # #region agent log
-        _ik_t3 = _t.time()
-        # #endregion
         qpos_result, is_in_collision, is_within_joint_limits = (
             self.motion_manager.local_ik_solver.solve_ik(target_poses_dict)
         )
-        # #region agent log
-        _ik_t4 = _t.time()
-        # #endregion
 
         if isinstance(qpos_result, dict):
             qpos_dict = qpos_result
@@ -241,11 +226,6 @@ class BaseIKController:
             qpos_dict = dict(zip(joint_names, qpos_result.tolist()))
 
         self.motion_manager.set_joint_pos(qpos_dict)
-        # #region agent log
-        _ik_t5 = _t.time()
-        import json as _j
-        with open("/home/dexmate/.cursor/debug-2bec47.log","a") as _f: _f.write(_j.dumps({"sessionId":"2bec47","location":"base_arm_teleop.py:move_delta_cartesian","message":"ik_timing","data":{"get_qpos_ms":(_ik_t1-_ik_t0)*1000,"fk_ms":(_ik_t2-_ik_t1)*1000,"build_target_ms":(_ik_t3-_ik_t2)*1000,"solve_ik_ms":(_ik_t4-_ik_t3)*1000,"set_qpos_ms":(_ik_t5-_ik_t4)*1000,"total_ms":(_ik_t5-_ik_t0)*1000},"hypothesisId":"H_IK_TIMING","timestamp":int(_ik_t5*1000)})+"\n")
-        # #endregion
 
         # Update visualizer if available
         if self.motion_manager.visualizer is not None:
