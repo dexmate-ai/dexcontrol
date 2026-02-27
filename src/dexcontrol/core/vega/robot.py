@@ -166,7 +166,7 @@ class VegaRobot:
                 dt=1.0 / max(1, self.control_hz),
                 avoid_self_collisions=False,
                 collision_pairs=0,
-                collision_margin=0.02,
+                collision_margin=0.01,
                 qp_solver="proxqp",
                 safety_buffer=0.2,
                 damping_weights=IKDampingWeightsConfig(

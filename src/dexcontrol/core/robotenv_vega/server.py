@@ -34,6 +34,17 @@ from proto import robotenv_pb2, robotenv_pb2_grpc  # noqa: E402
 
 LOGGER = logging.getLogger("robotenv_vega")
 
+# Per-arm init (home) and reset middle waypoints.
+# Left→Right mirroring: [-v0, -v1, -v2, v3, -v4, -v5, -v6]
+_INIT_JOINTS = {
+    "left":  np.array([-1.4234,  1.3524,  2.8707, -1.981,   0.6751, -0.1662,  0.068]),
+    "right": np.array([ 1.4234, -1.3524, -2.8707, -1.981,  -0.1515,  0.1662, -0.068]),
+}
+_RESET_MIDDLE_JOINTS = {
+    "left":  np.array([-2.218,   0.743,   2.8684, -1.5442, -1.2865, -0.6128, -1.1779]),
+    "right": np.array([ 2.218,  -0.743,  -2.8684, -1.5442,  1.8101,  0.6128,  1.1779]),
+}
+
 
 class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
     """RobotEnv service implementation for one Vega arm."""
@@ -80,7 +91,9 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         )
         self._robot.launch_robot()
 
-        self.reset_joints = self._robot.reset_joints.copy()
+        # Override home position with per-arm init joints.
+        self.reset_joints = _INIT_JOINTS[arm_side].copy()
+        self.reset_middle_joints = _RESET_MIDDLE_JOINTS[arm_side].copy()
         self.safe_transit_pose = self._robot.safe_transit_pose.copy()
 
         if base_frame_rotation is not None:
@@ -119,6 +132,10 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
             "enabled" if ema_alpha > 0 else "disabled",
             ema_alpha,
         )
+
+        # Move to init position on startup.
+        LOGGER.info("Moving to init position on startup (arm=%s)", arm_side)
+        self._execute_reset_sequence(self.reset_joints)
 
     @staticmethod
     def _compute_cartesian_delta_limits(control_hz: int) -> tuple[float, float]:
@@ -505,19 +522,29 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
     _RESET_TOLERANCE_RAD = 0.05
     _RESET_TIMEOUT_S = 30.0
     _RESET_CMD_HZ = 200.0
-    _RESET_MAX_STEP_RAD = 0.25
+    _RESET_MAX_STEP_RAD = 0.125
     _RESET_SETTLE_S = 0.5
 
     def _execute_reset_sequence(self, target_joints: np.ndarray) -> None:
         t0 = time.time()
         LOGGER.info("Reset[%s]: starting gripper open", self.arm_side)
         self._robot.update_gripper(0.0, velocity=False, blocking=True)
-        LOGGER.info("Reset[%s]: gripper done (%.2fs), starting move_incremental", self.arm_side, time.time() - t0)
+        LOGGER.info("Reset[%s]: gripper done (%.2fs), starting reset motion", self.arm_side, time.time() - t0)
         self._robot._ema_prev_qpos = None  # Reset EMA state before reset motion
         self._robot._last_cmd_joint_pos = None  # Reset command tracking
+
+        # Move to middle waypoint first to avoid collisions.
+        middle_f64 = np.asarray(self.reset_middle_joints, dtype=np.float64)
+        LOGGER.info("Reset[%s]: moving to middle waypoint", self.arm_side)
+        self._move_incremental(middle_f64)
+        LOGGER.info("Reset[%s]: middle waypoint reached (%.2fs)", self.arm_side, time.time() - t0)
+
+        # Then move to the final target (home/init position).
         target_f64 = np.asarray(target_joints, dtype=np.float64)
+        LOGGER.info("Reset[%s]: moving to target", self.arm_side)
         self._move_incremental(target_f64)
-        LOGGER.info("Reset[%s]: move_incremental done (%.2fs), syncing motion manager", self.arm_side, time.time() - t0)
+        LOGGER.info("Reset[%s]: target reached (%.2fs), syncing motion manager", self.arm_side, time.time() - t0)
+
         self._robot._ema_prev_qpos = None  # Reset EMA state after reaching target
         self._robot._last_cmd_joint_pos = None  # Reset command tracking
         self._robot.sync_motion_manager_with_arm(
@@ -804,5 +831,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
     main()
