@@ -34,6 +34,21 @@ from proto import robotenv_pb2, robotenv_pb2_grpc  # noqa: E402
 
 LOGGER = logging.getLogger("robotenv_vega")
 
+
+def _to_proto_value(val: Any) -> robotenv_pb2.Value:
+    """Convert a Python scalar / list / ndarray to a proto Value."""
+    if isinstance(val, (list, tuple, np.ndarray)):
+        return robotenv_pb2.Value(
+            float_array=robotenv_pb2.FloatArray(values=[float(v) for v in val])
+        )
+    if isinstance(val, (int, bool, np.integer, np.bool_)):
+        return robotenv_pb2.Value(float_value=float(val))
+    if isinstance(val, (float, np.floating)):
+        return robotenv_pb2.Value(float_value=float(val))
+    # Fallback: stringify
+    return robotenv_pb2.Value(string_value=str(val))
+
+
 # Per-arm init (home) and reset middle waypoints.
 # Left→Right mirroring: [-v0, -v1, -v2, v3, -v4, -v5, -v6]
 _INIT_JOINTS = {
@@ -387,6 +402,9 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
                 )
             t_after_xform = time.time()
 
+            # Get robot_state BEFORE executing action (needed for create_action_dict)
+            pre_action_state, _ = self._robot.get_robot_state()
+
             self._robot.update_command(
                 action,
                 action_space=action_space_for_robot,
@@ -394,22 +412,41 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
                 blocking=False,
             )
             t_after_cmd = time.time()
+
+            # Build comprehensive action_info using the original request action_space
+            # (before any velocity->delta conversion) so the dict contains all
+            # representations (cartesian_velocity, delta_action, joint_velocity, etc.)
+            try:
+                action_dict = self._robot.create_action_dict(
+                    np.asarray(request.action, dtype=np.float64),
+                    action_space=action_space,
+                    gripper_action_space=gripper_action_space,
+                    robot_state=pre_action_state,
+                )
+                action_info = self._action_dict_to_proto(action_dict)
+            except Exception as exc:
+                LOGGER.warning("create_action_dict failed, sending empty action_info: %s", exc)
+                action_info = {}
+            t_after_ainfo = time.time()
+
             observation, timestamp_us = self._create_observation()
             t_after_obs = time.time()
             total_ms = (t_after_obs - t_step_start) * 1000
             if total_ms > 20:
                 LOGGER.warning(
-                    "[Step SLOW] total=%.1fms (xform=%.1f cmd=%.1f obs=%.1f)",
+                    "[Step SLOW] total=%.1fms (xform=%.1f cmd=%.1f ainfo=%.1f obs=%.1f)",
                     total_ms,
                     (t_after_xform - t_step_start) * 1000,
                     (t_after_cmd - t_after_xform) * 1000,
-                    (t_after_obs - t_after_cmd) * 1000,
+                    (t_after_ainfo - t_after_cmd) * 1000,
+                    (t_after_obs - t_after_ainfo) * 1000,
                 )
             return robotenv_pb2.StepResponse(
                 observation=observation,
                 status="SUCCESS",
                 message="",
                 timestamp_us=timestamp_us,
+                action_info=action_info,
             )
         except JointLimitExceededError as exc:
             observation, timestamp_us = self._safe_observation()
@@ -511,6 +548,27 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
             ),
         }
         return observation, int(timestamp_us)
+
+    @staticmethod
+    def _action_dict_to_proto(action_dict: dict) -> dict:
+        """Convert create_action_dict() output to proto map<string, Value>.
+
+        Handles: float scalars, list/ndarray of floats, and nested robot_state
+        dict (which is serialised as a flat set of 'state.<key>' entries so the
+        client can reconstruct it).
+        """
+        proto_map: dict[str, Any] = {}
+
+        for key, val in action_dict.items():
+            if key == "robot_state":
+                # Flatten robot_state into "state.<subkey>" entries
+                if isinstance(val, dict):
+                    for sk, sv in val.items():
+                        proto_map[f"state.{sk}"] = _to_proto_value(sv)
+                continue
+            proto_map[key] = _to_proto_value(val)
+
+        return proto_map
 
     def _safe_observation(self) -> tuple[dict[str, Any], int]:
         try:

@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0erobotenv.proto\x12\x08robotenv\"\x1b\n\x19GetObservationSpecRequest\"\x12\n\x10GetConfigRequest\"\x14\n\x12HealthCheckRequest\"\x8a\x02\n\x0fObservationSpec\x12\x35\n\x06\x66ields\x18\x01 \x03(\x0b\x32%.robotenv.ObservationSpec.FieldsEntry\x12\x10\n\x08num_arms\x18\x02 \x01(\x05\x12\x39\n\x08metadata\x18\x03 \x03(\x0b\x32\'.robotenv.ObservationSpec.MetadataEntry\x1a\x42\n\x0b\x46ieldsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\"\n\x05value\x18\x02 \x01(\x0b\x32\x13.robotenv.FieldSpec:\x02\x38\x01\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"P\n\tFieldSpec\x12\r\n\x05\x64type\x18\x01 \x01(\t\x12\r\n\x05shape\x18\x02 \x03(\x05\x12\x10\n\x08required\x18\x03 \x01(\x08\x12\x13\n\x0b\x64\x65scription\x18\x04 \x01(\t\"\x90\x01\n\x0cResetRequest\x12\x0c\n\x04mode\x18\x01 \x01(\t\x12\x32\n\x06params\x18\x02 \x03(\x0b\x32\".robotenv.ResetRequest.ParamsEntry\x1a>\n\x0bParamsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1e\n\x05value\x18\x02 \x01(\x0b\x32\x0f.robotenv.Value:\x02\x38\x01\"\xca\x01\n\rResetResponse\x12=\n\x0bobservation\x18\x01 \x03(\x0b\x32(.robotenv.ResetResponse.ObservationEntry\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\x12\x14\n\x0ctimestamp_us\x18\x04 \x01(\x03\x1a\x43\n\x10ObservationEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1e\n\x05value\x18\x02 \x01(\x0b\x32\x0f.robotenv.Value:\x02\x38\x01\"Q\n\x0bStepRequest\x12\x0e\n\x06\x61\x63tion\x18\x01 \x03(\x01\x12\x14\n\x0c\x61\x63tion_space\x18\x02 \x01(\t\x12\x1c\n\x14gripper_action_space\x18\x03 \x01(\t\"\xc8\x01\n\x0cStepResponse\x12<\n\x0bobservation\x18\x01 \x03(\x0b\x32\'.robotenv.StepResponse.ObservationEntry\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\x12\x14\n\x0ctimestamp_us\x18\x04 \x01(\x03\x1a\x43\n\x10ObservationEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1e\n\x05value\x18\x02 \x01(\x0b\x32\x0f.robotenv.Value:\x02\x38\x01\"\xcd\x01\n\x0bRobotConfig\x12\x14\n\x0cgripper_type\x18\x01 \x01(\t\x12\x12\n\nframe_type\x18\x02 \x01(\t\x12\x0b\n\x03\x64of\x18\x03 \x03(\x05\x12\x1f\n\x17supported_action_spaces\x18\x04 \x03(\t\x12\x35\n\x08metadata\x18\x05 \x03(\x0b\x32#.robotenv.RobotConfig.MetadataEntry\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"G\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x0f\n\x07version\x18\x03 \x01(\t\"\x97\x01\n\x05Value\x12\x15\n\x0b\x66loat_value\x18\x01 \x01(\x01H\x00\x12+\n\x0b\x66loat_array\x18\x02 \x01(\x0b\x32\x14.robotenv.FloatArrayH\x00\x12\x13\n\tint_value\x18\x03 \x01(\x03H\x00\x12\x16\n\x0cstring_value\x18\x04 \x01(\tH\x00\x12\x15\n\x0b\x62ytes_value\x18\x05 \x01(\x0cH\x00\x42\x06\n\x04kind\"\x1c\n\nFloatArray\x12\x0e\n\x06values\x18\x01 \x03(\x01\x32\xdd\x02\n\x08RobotEnv\x12T\n\x12GetObservationSpec\x12#.robotenv.GetObservationSpecRequest\x1a\x19.robotenv.ObservationSpec\x12>\n\tGetConfig\x12\x1a.robotenv.GetConfigRequest\x1a\x15.robotenv.RobotConfig\x12\x38\n\x05Reset\x12\x16.robotenv.ResetRequest\x1a\x17.robotenv.ResetResponse\x12\x35\n\x04Step\x12\x15.robotenv.StepRequest\x1a\x16.robotenv.StepResponse\x12J\n\x0bHealthCheck\x12\x1c.robotenv.HealthCheckRequest\x1a\x1d.robotenv.HealthCheckResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0erobotenv.proto\x12\x08robotenv\"\x1b\n\x19GetObservationSpecRequest\"\x12\n\x10GetConfigRequest\"\x14\n\x12HealthCheckRequest\"\x8a\x02\n\x0fObservationSpec\x12\x35\n\x06\x66ields\x18\x01 \x03(\x0b\x32%.robotenv.ObservationSpec.FieldsEntry\x12\x10\n\x08num_arms\x18\x02 \x01(\x05\x12\x39\n\x08metadata\x18\x03 \x03(\x0b\x32\'.robotenv.ObservationSpec.MetadataEntry\x1a\x42\n\x0b\x46ieldsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\"\n\x05value\x18\x02 \x01(\x0b\x32\x13.robotenv.FieldSpec:\x02\x38\x01\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"P\n\tFieldSpec\x12\r\n\x05\x64type\x18\x01 \x01(\t\x12\r\n\x05shape\x18\x02 \x03(\x05\x12\x10\n\x08required\x18\x03 \x01(\x08\x12\x13\n\x0b\x64\x65scription\x18\x04 \x01(\t\"\x90\x01\n\x0cResetRequest\x12\x0c\n\x04mode\x18\x01 \x01(\t\x12\x32\n\x06params\x18\x02 \x03(\x0b\x32\".robotenv.ResetRequest.ParamsEntry\x1a>\n\x0bParamsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1e\n\x05value\x18\x02 \x01(\x0b\x32\x0f.robotenv.Value:\x02\x38\x01\"\xca\x01\n\rResetResponse\x12=\n\x0bobservation\x18\x01 \x03(\x0b\x32(.robotenv.ResetResponse.ObservationEntry\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\x12\x14\n\x0ctimestamp_us\x18\x04 \x01(\x03\x1a\x43\n\x10ObservationEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1e\n\x05value\x18\x02 \x01(\x0b\x32\x0f.robotenv.Value:\x02\x38\x01\"Q\n\x0bStepRequest\x12\x0e\n\x06\x61\x63tion\x18\x01 \x03(\x01\x12\x14\n\x0c\x61\x63tion_space\x18\x02 \x01(\t\x12\x1c\n\x14gripper_action_space\x18\x03 \x01(\t\"\xc9\x02\n\x0cStepResponse\x12<\n\x0bobservation\x18\x01 \x03(\x0b\x32\'.robotenv.StepResponse.ObservationEntry\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\x12\x14\n\x0ctimestamp_us\x18\x04 \x01(\x03\x12;\n\x0b\x61\x63tion_info\x18\x05 \x03(\x0b\x32&.robotenv.StepResponse.ActionInfoEntry\x1a\x43\n\x10ObservationEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1e\n\x05value\x18\x02 \x01(\x0b\x32\x0f.robotenv.Value:\x02\x38\x01\x1a\x42\n\x0f\x41\x63tionInfoEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x1e\n\x05value\x18\x02 \x01(\x0b\x32\x0f.robotenv.Value:\x02\x38\x01\"\xcd\x01\n\x0bRobotConfig\x12\x14\n\x0cgripper_type\x18\x01 \x01(\t\x12\x12\n\nframe_type\x18\x02 \x01(\t\x12\x0b\n\x03\x64of\x18\x03 \x03(\x05\x12\x1f\n\x17supported_action_spaces\x18\x04 \x03(\t\x12\x35\n\x08metadata\x18\x05 \x03(\x0b\x32#.robotenv.RobotConfig.MetadataEntry\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"G\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x0f\n\x07version\x18\x03 \x01(\t\"\x97\x01\n\x05Value\x12\x15\n\x0b\x66loat_value\x18\x01 \x01(\x01H\x00\x12+\n\x0b\x66loat_array\x18\x02 \x01(\x0b\x32\x14.robotenv.FloatArrayH\x00\x12\x13\n\tint_value\x18\x03 \x01(\x03H\x00\x12\x16\n\x0cstring_value\x18\x04 \x01(\tH\x00\x12\x15\n\x0b\x62ytes_value\x18\x05 \x01(\x0cH\x00\x42\x06\n\x04kind\"\x1c\n\nFloatArray\x12\x0e\n\x06values\x18\x01 \x03(\x01\x32\xdd\x02\n\x08RobotEnv\x12T\n\x12GetObservationSpec\x12#.robotenv.GetObservationSpecRequest\x1a\x19.robotenv.ObservationSpec\x12>\n\tGetConfig\x12\x1a.robotenv.GetConfigRequest\x1a\x15.robotenv.RobotConfig\x12\x38\n\x05Reset\x12\x16.robotenv.ResetRequest\x1a\x17.robotenv.ResetResponse\x12\x35\n\x04Step\x12\x15.robotenv.StepRequest\x1a\x16.robotenv.StepResponse\x12J\n\x0bHealthCheck\x12\x1c.robotenv.HealthCheckRequest\x1a\x1d.robotenv.HealthCheckResponseb\x06proto3')
 
 
 
@@ -32,6 +32,7 @@ _RESETRESPONSE_OBSERVATIONENTRY = _RESETRESPONSE.nested_types_by_name['Observati
 _STEPREQUEST = DESCRIPTOR.message_types_by_name['StepRequest']
 _STEPRESPONSE = DESCRIPTOR.message_types_by_name['StepResponse']
 _STEPRESPONSE_OBSERVATIONENTRY = _STEPRESPONSE.nested_types_by_name['ObservationEntry']
+_STEPRESPONSE_ACTIONINFOENTRY = _STEPRESPONSE.nested_types_by_name['ActionInfoEntry']
 _ROBOTCONFIG = DESCRIPTOR.message_types_by_name['RobotConfig']
 _ROBOTCONFIG_METADATAENTRY = _ROBOTCONFIG.nested_types_by_name['MetadataEntry']
 _HEALTHCHECKRESPONSE = DESCRIPTOR.message_types_by_name['HealthCheckResponse']
@@ -133,12 +134,20 @@ StepResponse = _reflection.GeneratedProtocolMessageType('StepResponse', (_messag
     # @@protoc_insertion_point(class_scope:robotenv.StepResponse.ObservationEntry)
     })
   ,
+
+  'ActionInfoEntry' : _reflection.GeneratedProtocolMessageType('ActionInfoEntry', (_message.Message,), {
+    'DESCRIPTOR' : _STEPRESPONSE_ACTIONINFOENTRY,
+    '__module__' : 'robotenv_pb2'
+    # @@protoc_insertion_point(class_scope:robotenv.StepResponse.ActionInfoEntry)
+    })
+  ,
   'DESCRIPTOR' : _STEPRESPONSE,
   '__module__' : 'robotenv_pb2'
   # @@protoc_insertion_point(class_scope:robotenv.StepResponse)
   })
 _sym_db.RegisterMessage(StepResponse)
 _sym_db.RegisterMessage(StepResponse.ObservationEntry)
+_sym_db.RegisterMessage(StepResponse.ActionInfoEntry)
 
 RobotConfig = _reflection.GeneratedProtocolMessageType('RobotConfig', (_message.Message,), {
 
@@ -190,6 +199,8 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _RESETRESPONSE_OBSERVATIONENTRY._serialized_options = b'8\001'
   _STEPRESPONSE_OBSERVATIONENTRY._options = None
   _STEPRESPONSE_OBSERVATIONENTRY._serialized_options = b'8\001'
+  _STEPRESPONSE_ACTIONINFOENTRY._options = None
+  _STEPRESPONSE_ACTIONINFOENTRY._serialized_options = b'8\001'
   _ROBOTCONFIG_METADATAENTRY._options = None
   _ROBOTCONFIG_METADATAENTRY._serialized_options = b'8\001'
   _GETOBSERVATIONSPECREQUEST._serialized_start=28
@@ -217,19 +228,21 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _STEPREQUEST._serialized_start=802
   _STEPREQUEST._serialized_end=883
   _STEPRESPONSE._serialized_start=886
-  _STEPRESPONSE._serialized_end=1086
+  _STEPRESPONSE._serialized_end=1215
   _STEPRESPONSE_OBSERVATIONENTRY._serialized_start=733
   _STEPRESPONSE_OBSERVATIONENTRY._serialized_end=800
-  _ROBOTCONFIG._serialized_start=1089
-  _ROBOTCONFIG._serialized_end=1294
+  _STEPRESPONSE_ACTIONINFOENTRY._serialized_start=1149
+  _STEPRESPONSE_ACTIONINFOENTRY._serialized_end=1215
+  _ROBOTCONFIG._serialized_start=1218
+  _ROBOTCONFIG._serialized_end=1423
   _ROBOTCONFIG_METADATAENTRY._serialized_start=319
   _ROBOTCONFIG_METADATAENTRY._serialized_end=366
-  _HEALTHCHECKRESPONSE._serialized_start=1296
-  _HEALTHCHECKRESPONSE._serialized_end=1367
-  _VALUE._serialized_start=1370
-  _VALUE._serialized_end=1521
-  _FLOATARRAY._serialized_start=1523
-  _FLOATARRAY._serialized_end=1551
-  _ROBOTENV._serialized_start=1554
-  _ROBOTENV._serialized_end=1903
+  _HEALTHCHECKRESPONSE._serialized_start=1425
+  _HEALTHCHECKRESPONSE._serialized_end=1496
+  _VALUE._serialized_start=1499
+  _VALUE._serialized_end=1650
+  _FLOATARRAY._serialized_start=1652
+  _FLOATARRAY._serialized_end=1680
+  _ROBOTENV._serialized_start=1683
+  _ROBOTENV._serialized_end=2032
 # @@protoc_insertion_point(module_scope)

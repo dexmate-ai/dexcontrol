@@ -163,6 +163,13 @@ message StepResponse {
 
     // Observation timestamp in microseconds since epoch
     int64 timestamp_us = 4;
+
+    // Action info: comprehensive action representation computed by the server.
+    // Contains all derived action data (joint_position, joint_velocity,
+    // cartesian_position, cartesian_velocity, delta_action, gripper_delta, etc.)
+    // so that downstream data pipelines receive the same rich format
+    // regardless of robot type (Franka, Vega, etc.).
+    map<string, Value> action_info = 5;
 }
 
 // ============================================================================
