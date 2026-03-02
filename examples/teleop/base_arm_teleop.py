@@ -99,6 +99,7 @@ class BaseIKController:
                 initial_joint_configuration_dict=joint_pos_dict,
                 local_ik_solver_type=ik_solver_type,
                 custom_local_ik_config=custom_local_ik_config,
+                init_planner=False,
             )
 
             logger.success("Motion Manager setup complete")

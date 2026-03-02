@@ -143,12 +143,15 @@ class VegaRobot:
         self._prev_joint_vel: np.ndarray | None = None
         self._vel_smoothing_alpha = 0.3  # EMA factor: 0=fully smooth, 1=no smoothing
         self._last_cmd_joint_pos: np.ndarray | None = None  # Track last sent command for delta clipping
+        self._prev_cmd_delta: np.ndarray | None = None  # Previous step delta for jerk limiting
         self._HW_CORRECTION_ALPHA = 0.7  # Per-step blend toward hw feedback (0=ignore hw, 1=snap to hw)
         self._HW_CORRECTION_OUTLIER_THRESH = 0.5  # If |hw - cmd| > this, skip correction for that joint entirely
 
-        # EMA filter for joint position commands (0.0 = disabled, 0.05~0.3 = typical range)
-        self._ema_alpha = float(ema_alpha)
-        self._ema_prev_qpos: np.ndarray | None = None
+        # Critically damped 2nd-order smoothing filter for joint commands.
+        # alpha controls responsiveness (0.0 = disabled, 0.3~0.8 = typical).
+        self._ema_alpha = float(np.clip(ema_alpha, 0.0, 0.99))
+        self._filter_pos: np.ndarray | None = None
+        self._filter_vel: np.ndarray | None = None
 
         if self.hand is not None:
             self._refresh_gripper_state()
@@ -185,13 +188,23 @@ class VegaRobot:
         except Exception:
             return None
 
+    def reset_filter_state(self) -> None:
+        """Reset smoothing filter and command-tracking state.
+
+        Call before/after large discontinuous motions (e.g. reset sequences)
+        to prevent the filter from ramping between old and new positions.
+        """
+        self._filter_pos = None
+        self._filter_vel = None
+        self._last_cmd_joint_pos = None
+        self._prev_cmd_delta = None
+
     def launch_robot(self) -> None:
         """Validate robot readiness and default control mode."""
         self.arm.set_modes(["position"] * 7)
         if self.arm.joint_pos_limit is None:
             raise RuntimeError("Arm joint position limits are unavailable")
-        self._ema_prev_qpos = None  # Reset EMA state on launch
-        self._last_cmd_joint_pos = None  # Reset command tracking on launch
+        self.reset_filter_state()
         self.sync_motion_manager_with_arm(self.reset_joints)
 
     def _start_gripper_worker(self) -> None:
@@ -363,16 +376,36 @@ class VegaRobot:
         else:  # cartesian_delta
             target_joint_pos = self._solve_cartesian_delta(arm_action[:3], arm_action[3:6])
 
-        # Apply EMA smoothing to joint position command
+        # Log per-joint delta from IK (before smoothing/clipping)
+        ik_delta = target_joint_pos - current_joint_pos
+        if np.max(np.abs(ik_delta)) > 0.01:
+            _logger.info(
+                "[IKDelta] space=%s delta=%s cart_in=%s",
+                action_space,
+                np.round(ik_delta, 4).tolist(),
+                np.round(arm_action[:6], 4).tolist() if not action_space.startswith("joint") else "n/a",
+            )
+
+        # Critically damped 2nd-order smoothing filter.
+        # Exact discrete solution — unconditionally stable, zero overshoot.
+        # omega (natural frequency) is derived from ema_alpha so the CLI
+        # parameter retains a similar "responsiveness" feel.
         if self._ema_alpha > 0.0:
-            if self._ema_prev_qpos is None:
-                self._ema_prev_qpos = target_joint_pos.copy()
+            if self._filter_pos is None:
+                self._filter_pos = target_joint_pos.copy()
+                self._filter_vel = np.zeros_like(target_joint_pos)
             else:
-                target_joint_pos = (
-                    self._ema_alpha * target_joint_pos
-                    + (1.0 - self._ema_alpha) * self._ema_prev_qpos
-                )
-                self._ema_prev_qpos = target_joint_pos.copy()
+                alpha = self._ema_alpha
+                omega = alpha / (dt * (1.0 - alpha))
+
+                exp_term = np.exp(-omega * dt)
+                err = self._filter_pos - target_joint_pos
+                c = self._filter_vel + omega * err
+
+                self._filter_pos = target_joint_pos + (err + c * dt) * exp_term
+                self._filter_vel = (self._filter_vel - c * omega * dt) * exp_term
+
+                target_joint_pos = self._filter_pos.copy()
 
         try:
             self.update_joints(target_joint_pos, velocity=False, blocking=blocking)
@@ -389,7 +422,23 @@ class VegaRobot:
             self._prev_command_successful = False
             raise CommunicationFailedError(str(exc)) from exc
 
-    _MOTOR_MAX_DELTA_RAD = 0.25
+    # Per-joint maximum delta per control step (radians).
+    # j1-j3 (shoulder/base) are kept conservative; j4-j7 (elbow/wrist)
+    # get larger limits because the IK solver assigns them larger deltas
+    # due to their lower damping weights.
+    _MOTOR_MAX_DELTA_RAD = np.array([
+        0.35,   # j1 – base rotation
+        0.35,   # j2 – shoulder
+        0.35,   # j3 – shoulder
+        0.5,    # j4 – elbow
+        0.6,    # j5 – wrist
+        0.6,    # j6 – wrist
+        0.6,    # j7 – wrist
+    ], dtype=np.float64)
+
+    # Maximum change in velocity per step (jerk limit in rad/step^2).
+    # Prevents abrupt acceleration/deceleration that causes oscillation.
+    _MOTOR_MAX_JERK_RAD = 0.25
 
     _JOINT_LIMIT_TOLERANCE_RAD = 0.01  # ~0.57 deg tolerance for IK numerical precision
 
@@ -436,10 +485,31 @@ class VegaRobot:
         else:
             current = hw_pos
         diff = target_joint_pos - current
-        max_diff = float(np.max(np.abs(diff)))
-        if max_diff > self._MOTOR_MAX_DELTA_RAD:
+        clipped_mask = np.abs(diff) > self._MOTOR_MAX_DELTA_RAD
+        if np.any(clipped_mask):
             clipped = np.clip(diff, -self._MOTOR_MAX_DELTA_RAD, self._MOTOR_MAX_DELTA_RAD)
+            clipped_indices = np.where(clipped_mask)[0]
+            _logger.info(
+                "[DeltaClip] joints=%s raw=%s limit=%s",
+                clipped_indices.tolist(),
+                np.round(diff[clipped_mask], 4).tolist(),
+                self._MOTOR_MAX_DELTA_RAD[clipped_mask].tolist(),
+            )
             target_joint_pos = current + clipped
+            diff = clipped
+
+        # Jerk limit: restrict how fast the per-step delta can change between
+        # consecutive steps.  Smooths acceleration/deceleration to prevent
+        # the abrupt velocity changes that cause oscillation on stop.
+        if self._prev_cmd_delta is not None and self._MOTOR_MAX_JERK_RAD > 0:
+            accel = diff - self._prev_cmd_delta
+            jerk_limit = self._MOTOR_MAX_JERK_RAD
+            jerk_mask = np.abs(accel) > jerk_limit
+            if np.any(jerk_mask):
+                accel = np.clip(accel, -jerk_limit, jerk_limit)
+                diff = self._prev_cmd_delta + accel
+                target_joint_pos = current + diff
+        self._prev_cmd_delta = diff.copy()
 
         if self.use_velocity_feedforward and not blocking:
             dt = 1.0 / max(1, self.control_hz)
@@ -449,6 +519,12 @@ class VegaRobot:
                 target_joint_vel = a * raw_vel + (1.0 - a) * self._prev_joint_vel
             else:
                 target_joint_vel = raw_vel
+            # Per-joint velocity damping: scale down velocity when delta is small
+            # to help joints settle near target without overshoot.
+            pos_err = np.abs(target_joint_pos - current)
+            damp_thresh = 0.05  # rad – below this, velocity starts tapering
+            damp_scale = np.clip(pos_err / damp_thresh, 0.0, 1.0)
+            target_joint_vel = target_joint_vel * damp_scale
             self._prev_joint_vel = target_joint_vel.copy()
             self.arm.set_joint_pos_vel(target_joint_pos, target_joint_vel, relative=False)
         elif blocking:

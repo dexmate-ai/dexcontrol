@@ -142,11 +142,14 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
             self._max_lin_delta,
             self._max_rot_delta,
         )
-        LOGGER.info(
-            "EMA smoothing: %s (alpha=%.3f)",
-            "enabled" if ema_alpha > 0 else "disabled",
-            ema_alpha,
-        )
+        if ema_alpha > 0:
+            _omega = ema_alpha / ((1.0 / max(1, control_hz)) * (1.0 - ema_alpha))
+            LOGGER.info(
+                "2nd-order smoothing: enabled (alpha=%.3f, omega=%.1f rad/s, critically damped)",
+                ema_alpha, _omega,
+            )
+        else:
+            LOGGER.info("Smoothing: disabled (alpha=0.0)")
 
         # Move to init position on startup.
         LOGGER.info("Moving to init position on startup (arm=%s)", arm_side)
@@ -159,7 +162,7 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         scale = 1.0 - (float(control_hz) - baseline_hz) / 80.0
         # Keep behavior safe even when control_hz is unexpectedly high.
         scale = float(np.clip(scale, 0.1, 1.5))
-        return 0.075 * scale, 0.15 * scale
+        return 0.075 * scale, 0.3 * scale
 
     def _cartesian_velocity_to_delta(self, action: np.ndarray) -> np.ndarray:
         """Convert normalized 6D Cartesian velocity command to per-step delta."""
@@ -588,8 +591,7 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         LOGGER.info("Reset[%s]: starting gripper open", self.arm_side)
         self._robot.update_gripper(0.0, velocity=False, blocking=True)
         LOGGER.info("Reset[%s]: gripper done (%.2fs), starting reset motion", self.arm_side, time.time() - t0)
-        self._robot._ema_prev_qpos = None  # Reset EMA state before reset motion
-        self._robot._last_cmd_joint_pos = None  # Reset command tracking
+        self._robot.reset_filter_state()
 
         # Move to middle waypoint first to avoid collisions.
         middle_f64 = np.asarray(self.reset_middle_joints, dtype=np.float64)
@@ -603,8 +605,7 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
         self._move_incremental(target_f64)
         LOGGER.info("Reset[%s]: target reached (%.2fs), syncing motion manager", self.arm_side, time.time() - t0)
 
-        self._robot._ema_prev_qpos = None  # Reset EMA state after reaching target
-        self._robot._last_cmd_joint_pos = None  # Reset command tracking
+        self._robot.reset_filter_state()
         self._robot.sync_motion_manager_with_arm(
             np.asarray(self._robot.arm.get_joint_pos(), dtype=np.float64)
         )
@@ -868,8 +869,9 @@ def main() -> None:
         "--ema-alpha",
         type=float,
         default=0.0,
-        help="EMA smoothing factor for joint commands (0.0=disabled, 0.05~0.3=typical). "
-             "Lower values = smoother but more latency (default: 0.0)",
+        help="Smoothing responsiveness for joint commands (0.0=disabled, 0.3~0.8=typical). "
+             "Uses a critically damped 2nd-order filter: higher = faster tracking, "
+             "lower = smoother. No overshoot at any setting. (default: 0.0)",
     )
     args = parser.parse_args()
 
