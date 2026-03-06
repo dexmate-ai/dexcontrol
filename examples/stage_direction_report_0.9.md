@@ -1,0 +1,66 @@
+# Stage Directionality Report
+
+- log_path: `/home/dexmate/.cursor/debug-daf7f0.log`
+- run_id_filters: `ALL`
+- line_window_start: `15323`
+- line_window_end: `20353`
+- loop_window: size=240, index_from_end=2 (matched_total=1200)
+
+## Stage Definitions
+
+- `H30` (`ik_fk_projection_error`): intended Cartesian target vs FK of IK-solved joints.
+- `H32` (`post_filter_fk_error`): intended Cartesian target vs FK after smoothing/filter stage.
+- `H33` (`post_limits_fk_error`): intended Cartesian target vs FK after clip/jerk limits.
+- `H34` (`joint_direction_transfer`): commanded joint delta vs next-tick achieved joint delta.
+- `H31` (`achieved_tracking_error`): intended Cartesian target direction vs next-tick observed Cartesian movement.
+
+## Overall (All Arms)
+
+| Stage | n | cos_mean | cos_p05 | cos_p50 | cos<0 (%) | cos<0.3 (%) | perp_mean | perp_p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| H30 | 238 | 0.9704 | 0.9317 | 0.9768 | 0.00 | 0.00 | 0.2266 | 0.3633 |
+| H32 | 238 | 0.8425 | -0.2682 | 0.9769 | 5.46 | 6.30 | 0.2472 | 0.6582 |
+| H33 | 238 | 0.8425 | -0.2682 | 0.9769 | 5.46 | 6.30 | 0.2472 | 0.6582 |
+| H34 | 478 | 0.8070 | -0.6784 | 0.9689 | 6.90 | 7.74 | 0.3174 | 0.8062 |
+| H31 | 238 | 0.6534 | -0.9607 | 0.9280 | 13.45 | 17.65 | 0.3975 | 0.9638 |
+
+## By Arm
+
+### arm: `left`
+
+| Stage | n | cos_mean | cos_p05 | cos_p50 | cos<0 (%) | cos<0.3 (%) | perp_mean | perp_p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| H30 | 119 | 0.9750 | 0.9380 | 0.9846 | 0.00 | 0.00 | 0.2038 | 0.3467 |
+| H32 | 119 | 0.8450 | -0.2291 | 0.9798 | 5.88 | 6.72 | 0.2219 | 0.5414 |
+| H33 | 119 | 0.8450 | -0.2291 | 0.9798 | 5.88 | 6.72 | 0.2219 | 0.5414 |
+| H34 | 239 | 0.8017 | -0.6782 | 0.9697 | 7.11 | 7.95 | 0.3187 | 0.7994 |
+| H31 | 119 | 0.6536 | -0.9651 | 0.9343 | 12.61 | 18.49 | 0.3791 | 0.9810 |
+
+### arm: `right`
+
+| Stage | n | cos_mean | cos_p05 | cos_p50 | cos<0 (%) | cos<0.3 (%) | perp_mean | perp_p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| H30 | 119 | 0.9657 | 0.9309 | 0.9748 | 0.00 | 0.00 | 0.2495 | 0.3651 |
+| H32 | 119 | 0.8400 | -0.0655 | 0.9756 | 5.04 | 5.88 | 0.2725 | 0.7175 |
+| H33 | 119 | 0.8400 | -0.0655 | 0.9756 | 5.04 | 5.88 | 0.2725 | 0.7175 |
+| H34 | 239 | 0.8123 | -0.6523 | 0.9671 | 6.69 | 7.53 | 0.3162 | 0.8062 |
+| H31 | 119 | 0.6533 | -0.9588 | 0.9155 | 14.29 | 16.81 | 0.4158 | 0.9279 |
+
+## Raw Message Counts
+
+- `achieved_tracking_error`: 478
+- `axis_segment_start`: 11
+- `ik_fk_projection_error`: 478
+- `ik_solve_result`: 956
+- `ik_solve_start`: 956
+- `joint_direction_transfer`: 478
+- `joint_update_metrics`: 478
+- `loop_timing`: 240
+- `post_filter_fk_error`: 478
+- `post_limits_fk_error`: 478
+
+## Interpretation Guide
+
+- Higher `cos_mean` (closer to 1) is better direction match.
+- Lower `perp_mean` is better (less orthogonal contamination).
+- Typical degradation pattern in this pipeline is `H30~H33` stable, then drop at `H34/H31`.

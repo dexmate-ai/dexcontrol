@@ -172,10 +172,6 @@ class VegaRobot:
                 "arm_side": self.arm_side,
                 "control_hz": self.control_hz,
                 "ik_solver_type": self._ik_solver_type,
-                "ik_damping_default": self._ik_damping_default,
-                "ik_damping_torso": self._ik_damping_torso,
-                "ik_damping_arm_j2": self._ik_damping_arm_j2,
-                "ik_damping_arm_j3": self._ik_damping_arm_j3,
             },
         )
         # #endregion
@@ -218,7 +214,7 @@ class VegaRobot:
                 qp_solver="proxqp",
                 safety_buffer=0.2,
                 damping_weights=IKDampingWeightsConfig(
-                    default=self._ik_damping_default,
+                    default=1e-3,
                     override={
                         "torso_j1": 30000.0,
                         "torso_j2": 30000.0,
