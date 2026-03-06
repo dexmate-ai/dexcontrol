@@ -107,10 +107,6 @@ class VegaRobotEnvService(robotenv_pb2_grpc.RobotEnvServicer):
             ik_solver_type=ik_solver_type,
             robotiq_comport=robotiq_comport,
             ema_alpha=ema_alpha,
-            ik_damping_default=ik_damping_default,
-            ik_damping_torso=ik_damping_torso,
-            ik_damping_arm_j2=ik_damping_arm_j2,
-            ik_damping_arm_j3=ik_damping_arm_j3,
         )
         self._robot.launch_robot()
 
