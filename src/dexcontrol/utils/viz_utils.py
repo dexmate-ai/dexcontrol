@@ -52,10 +52,10 @@ def show_component_status(status_info: dict[str, dict]):
                     Expected structure: {'states': {'component_name': {'connection': int, 'operation': int, 'error': {...}}}}
                     or old structure: {'component_name': {'connected': bool, 'enabled': bool, 'error_state': int, 'error_code': int}}
     """
-    if "states" not in status_info:
+    if not status_info.get("states"):
         return
-    # Extract states from the new structure, fallback to old structure
-    states = status_info.get("states", status_info)
+    # Extract states from the new structure
+    states = status_info["states"]
 
     table = Table(title="Component Status")
     table.add_column("Component", style="cyan")

@@ -28,12 +28,8 @@ from dexcontrol.core.component import RobotJointComponent
 class Torso(RobotJointComponent):
     """Robot torso control class.
 
-    This class provides methods to control a robot torso by publishing commands and
-    receiving state information through Zenoh communication.
-
-    Attributes:
-        default_vel: Default joint velocity in rad/s when not explicitly specified.
-        max_vel: Maximum allowed joint velocity in rad/s.
+    Provides joint position and velocity control for the robot torso, publishing
+    commands and receiving state updates through Zenoh communication.
     """
 
     def __init__(
@@ -44,8 +40,9 @@ class Torso(RobotJointComponent):
         """Initialize the torso controller.
 
         Args:
-            robot_info: RobotInfo instance.
-                and default velocity settings.
+            name: Name of the torso component as registered in the robot configuration.
+            robot_info: RobotInfo instance used to retrieve joint names, limits,
+                topics, and default velocity settings.
         """
         joint_names = robot_info.get_component_joints(name)
         joint_pos_limits = robot_info.get_joint_pos_limits(joint_names)
@@ -157,7 +154,8 @@ class Torso(RobotJointComponent):
             exit_on_reach_kwargs: Optional parameters for exit when the joint positions are reached.
 
         Raises:
-            ValueError: If joint_pos dictionary contains invalid joint names.
+            ValueError: If wait_time is negative or joint_pos dictionary contains
+                invalid joint names.
         """
         self.set_joint_pos_vel(
             joint_pos,

@@ -185,10 +185,13 @@ class Arm(RobotJointComponent):
         """Sets the operating modes of the arm.
 
         Args:
-            modes: List of operating modes for the arm. Each mode must be either "position", "disable", or "current".
+            modes: List of 7 operating modes for the arm, one per joint. Each
+                mode must be either ``"position"`` (enable position control) or
+                ``"disable"`` (disable control).
 
         Raises:
-            ValueError: If any mode in the list is invalid.
+            ValueError: If any mode in the list is invalid, or if the list
+                does not contain exactly 7 elements.
         """
         mode_map = {
             "position": JointModeEnum.POSITION,
@@ -412,13 +415,20 @@ class Arm(RobotJointComponent):
         Args:
             p_multipliers: List of 7 P-gain multipliers, one for each joint.
                 Range: [0.1, 4] per joint.
+            i_multipliers: Optional multipliers for the I term, one per joint.
+                If None, the I term is not modified. Defaults to None.
+            d_multipliers: Optional multipliers for the D term, one per joint.
+                If None, the D term is not modified. Defaults to None.
 
         Returns:
             Dictionary with 'success' (bool), 'p' (list), and 'message' (str).
+            On service timeout, returns ``{"success": False, "message": ...}``
+            instead of raising an exception.
 
         Raises:
-            ValueError: If multipliers are not exactly 7 values or out of range [0.1, 4].
-            ServiceUnavailableError: If the service is not available or the operation fails.
+            ValueError: If ``p_multipliers`` does not have exactly 7 values or
+                any value is outside the range [0.1, 4].
+            ServiceUnavailableError: If the PID service is not available.
         """
         if i_multipliers is not None or d_multipliers is not None:
             logger.warning("Only the modification of P value is supported for now")
@@ -616,10 +626,14 @@ class Arm(RobotJointComponent):
             baud_rate: Baud rate value (e.g., 115200, 1000000).
 
         Returns:
-            Dictionary with 'success' (bool), 'baud_rate' (int), and 'message' (str).
+            On success, a dictionary containing at least ``'success'`` (bool) and
+            ``'message'`` (str); the server response may also include ``'baud_rate'``
+            (int). On service timeout, returns ``{"success": False, "message": ...}``
+            instead of raising an exception.
 
         Raises:
-            ServiceUnavailableError: If the service is not available or the operation fails.
+            ServiceUnavailableError: If the EE baud rate service is not
+                available.
         """
         if not self._ee_baud_rate_querier.wait_for_service(timeout=5.0):
             raise ServiceUnavailableError(
@@ -724,7 +738,9 @@ class ArmWrenchSensor(RobotComponent):
         """Initialize the wrench sensor reader.
 
         Args:
-            state_sub_topic: Topic to subscribe to for wrench sensor data.
+            name: Component name used to identify this sensor instance.
+            state_sub_topic: Zenoh topic to subscribe to for wrench sensor data.
+            button_sub_topic: Zenoh topic to subscribe to for wrist button state.
         """
         super().__init__(
             name=name,
@@ -761,7 +777,9 @@ class ArmWrenchSensor(RobotComponent):
         """Get the state of the wrench sensor buttons.
 
         Returns:
-            Tuple of (blue_button_state, green_button_state).
+            Dictionary with keys ``'blue_button'`` and ``'green_button'``, each
+            mapping to a bool indicating whether that button is pressed. Returns
+            ``False`` for both buttons if no state has been received yet.
         """
         with self._button_lock:
             state = self._latest_button_state

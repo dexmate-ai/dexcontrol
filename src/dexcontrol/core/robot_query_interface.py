@@ -43,11 +43,15 @@ from dexcontrol.utils.viz_utils import show_component_status
 
 
 class RobotQueryInterface:
-    """Base class for zenoh query operations.
+    """Standalone communication interface for querying a robot over DexComm.
 
-    This class provides a clean interface for all zenoh-based queries and
-    communication operations. It maintains references to the zenoh session
+    This class provides a clean interface for all DexComm-based queries and
+    communication operations. It maintains references to the DexComm node
     and configuration needed for queries.
+
+    Use ``RobotQueryInterface.create()`` to construct an instance without
+    needing the full ``Robot`` class. ``Robot`` extends this class to add
+    motion-control capabilities.
 
     Can be used as a context manager for automatic resource cleanup:
         >>> with RobotQueryInterface.create() as interface:
@@ -58,12 +62,11 @@ class RobotQueryInterface:
         """Initialize the RobotQueryInterface.
 
         Args:
-            name: Name of the robot query interface component Node.
             configs: Robot configuration containing query names.
         """
         # Session parameter kept for compatibility but not used
         self._configs = configs
-        self._node = Node(name="robot_query_interface")
+        self._node = Node(name="dexmate_robot")
         self._hand_querier = self._node.create_service_client(
             service_name=configs.querables["hand_info"],
             request_encoder=None,
@@ -142,6 +145,9 @@ class RobotQueryInterface:
     def query_hand_type(self, max_attempts: int = 5) -> dict[str, HandType]:
         """Query the hand type information from the server.
 
+        Args:
+            max_attempts: Maximum number of query attempts before raising an error.
+
         Returns:
             Dictionary containing hand type information for left and right hands.
             Format: {"left": hand_type_name, "right": hand_type_name}
@@ -150,7 +156,7 @@ class RobotQueryInterface:
 
         Raises:
             RobotConnectionError: If cannot connect to robot.
-            ServiceUnavailableError: If hand type information cannot be retrieved after 3 attempts.
+            ServiceUnavailableError: If hand type information cannot be retrieved after ``max_attempts`` attempts.
         """
         last_error = None
 
@@ -200,9 +206,8 @@ class RobotQueryInterface:
         """Query the NTP server via zenoh for time synchronization and compute robust statistics.
 
         Args:
-            sample_count: Number of NTP samples to request (default: 50).
+            sample_count: Number of NTP samples to request (default: 30).
             show: Whether to print summary statistics using a rich table.
-            timeout: Timeout for the zenoh querier in seconds (default: 2.0).
             device: Which device to query for NTP ("soc" or "jetson").
 
         Returns:
@@ -210,6 +215,9 @@ class RobotQueryInterface:
                 - "success": True if any replies were received, False otherwise.
                 - "offset": Mean offset (in seconds) after removing RTT outliers.
                 - "rtt": Mean round-trip time (in seconds) after removing RTT outliers.
+
+        Raises:
+            NotImplementedError: If device is "jetson" (not yet implemented).
         """
         if device == "jetson":
             raise NotImplementedError("Jetson NTP query is not implemented yet")
@@ -351,7 +359,6 @@ class RobotQueryInterface:
             part: Component to reboot ("arm", "chassis", or "torso").
 
         Raises:
-            ValueError: If the specified component is invalid.
             ServiceUnavailableError: If the reboot operation fails.
         """
         # wait_for_service is implemented in Rust, not in Python type stubs

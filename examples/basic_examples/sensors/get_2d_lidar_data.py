@@ -18,9 +18,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import tyro
-from dexcontrol.config.vega import get_vega_config
 from loguru import logger
 
+from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
 
 try:
@@ -83,7 +83,7 @@ def print_scan_info(
 
 def main() -> None:
     """Initializes the robot, retrieves LIDAR data, and displays it."""
-    configs = get_vega_config()
+    configs = get_robot_config()
     configs.enable_sensor("lidar")
     robot = Robot(configs=configs)
 

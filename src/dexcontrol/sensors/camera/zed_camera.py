@@ -55,13 +55,13 @@ from typing import Any, cast
 
 import numpy as np
 from dexbot_utils.configs.components.sensors import CameraConfig
-from dexcomm.codecs import JsonDataCodec
 from loguru import logger
 
 from dexcontrol.sensors.camera.base_camera import (
     BaseCameraSensor,
     StreamType,
 )
+from dexcontrol.utils.comm_helper import query_json_service
 
 
 class ZedCameraSensor(BaseCameraSensor):
@@ -101,17 +101,17 @@ class ZedCameraSensor(BaseCameraSensor):
         super().__init__(name=name)
 
         # Create stream subscribers
-        for name in ["left_rgb", "right_rgb", "depth"]:
-            cam_config = cast(CameraConfig, getattr(configs, name))
-            self._streams[name] = self._create_stream(
-                stream_name=name,
+        for stream_name in ["left_rgb", "right_rgb", "depth"]:
+            cam_config = cast(CameraConfig, getattr(configs, stream_name))
+            self._streams[stream_name] = self._create_stream(
+                stream_name=stream_name,
                 config={
                     "enable": cam_config.enabled,
                     "transport": cam_config.transport,
                     "topic": cam_config.topic,
                     "rtc_channel": cam_config.rtc_channel,
                 },
-                stream_type=StreamType.RGB if name in ["left_rgb", "right_rgb"] else StreamType.DEPTH,
+                stream_type=StreamType.RGB if stream_name in ["left_rgb", "right_rgb"] else StreamType.DEPTH,
             )
 
 
@@ -332,49 +332,30 @@ class ZedCameraSensor(BaseCameraSensor):
             name: Camera name used to construct the service topic.
             configs: Camera configuration object.
         """
-        if self._node is None:
-            logger.warning(f"Cannot set up camera info service for '{name}': Node not available")
-            return
-
         # Construct service topic based on camera name
         # Expected format: sensors/{camera_name}/info
         service_topic = f"sensors/{name}/info"
 
-        try:
-            # Query camera info immediately on startup
-            self._query_camera_info(service_topic)
-            logger.info(f"Camera info service initialized for '{name}' at '{service_topic}'")
-        except Exception as e:
-            logger.warning(f"Failed to query camera info for '{name}': {e}")
+        # Query camera info on startup (best-effort)
+        result = self._query_camera_info(service_topic)
+        if result is not None:
+            logger.info(f"Camera info retrieved for '{name}' from '{service_topic}'")
+        else:
+            logger.debug(f"Camera info service not available for '{name}' at '{service_topic}'")
 
     def _query_camera_info(self, service_topic: str) -> dict[str, Any] | None:
         """Query camera info from dexsensor service.
 
         Args:
-            service_topic: Service topic to query.
+            service_topic: Service topic to query (will be namespace-resolved).
 
         Returns:
             Camera information dictionary or None if query fails.
         """
-        if self._node is None:
-            return None
-
-        try:
-            # Call service with empty request
-            response = self._node.call_service(service_topic, b"", timeout=2.0)
-
-            if response is None:
-                logger.debug(f"No response from camera info service: {service_topic}")
-                return None
-
-            # Decode JSON response
-            info_dict = JsonDataCodec.decode(response)
+        info_dict = query_json_service(service_topic, timeout=2.0, max_retries=1)
+        if info_dict is not None:
             self._camera_info_cache = info_dict
-            return info_dict
-
-        except Exception as e:
-            logger.debug(f"Failed to query camera info from '{service_topic}': {e}")
-            return None
+        return info_dict
 
     def get_camera_info(self, force_refresh: bool = False) -> dict[str, Any] | None:
         """Get camera information from dexsensor.

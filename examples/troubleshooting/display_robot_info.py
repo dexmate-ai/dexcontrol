@@ -27,7 +27,7 @@ def main() -> None:
     # Initialize robot with default configuration
     configs = get_robot_config()
     if "estop" in configs.components:
-        configs.components["estop"].enabled = False
+        configs.components["estop"].monitoring = False
     bot = Robot(configs=configs)
 
     # Display robot system information

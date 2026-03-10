@@ -36,13 +36,10 @@ from dexcontrol.core.component import RobotJointComponent
 class Head(RobotJointComponent):
     """Robot head control class.
 
-    This class provides methods to control a robot head by publishing commands and
-    receiving state information through Zenoh communication.
-
-    Attributes:
-        mode_querier: Zenoh querier for setting head mode.
-        default_vel: Default joint velocities for all joints.
-        max_vel: Maximum allowed joint velocities for all joints.
+    Provides methods to control a 3-DOF robot head by publishing joint commands
+    and receiving state information through Zenoh communication.  Supports
+    position and velocity control, mode switching (enable/disable), and
+    graceful stop/shutdown.
     """
 
     def __init__(
@@ -53,7 +50,10 @@ class Head(RobotJointComponent):
         """Initialize the head controller.
 
         Args:
-            robot_info: RobotInfo instance.
+            name: Component name used to look up joints and config from
+                ``robot_info``.
+            robot_info: RobotInfo instance that provides joint names, limits,
+                and the component configuration.
         """
         joint_names = robot_info.get_component_joints(name)
         joint_pos_limits = robot_info.get_joint_pos_limits(joint_names)
@@ -92,20 +92,27 @@ class Head(RobotJointComponent):
     ) -> None:
         """Send joint position control commands to the head.
 
+        Velocities are computed automatically from the joint velocity limits.
+
         Args:
-            joint_pos: Joint positions as either:
-                - List of joint values [j1, j2]
-                - Numpy array with shape (3,), in radians
-                - Dictionary mapping joint names to position values
-            relative: If True, the joint positions are relative to the current position.
-            wait_time: Time to wait after sending command in seconds. If 0, returns
-                immediately after sending command.
-            wait_kwargs: Optional parameters for trajectory generation (not used in Head).
-            exit_on_reach: If True, the function will exit when the joint positions are reached.
-            exit_on_reach_kwargs: Optional parameters for exit when the joint positions are reached.
+            joint_pos: Target joint positions as either:
+                - A list of 3 floats ``[j1, j2, j3]``, in radians
+                - A numpy array with shape ``(3,)``, in radians
+                - A dict mapping joint names to position values
+            relative: If ``True``, ``joint_pos`` is interpreted as an offset
+                from the current joint positions.
+            wait_time: Time to wait after sending the command, in seconds.
+                Pass ``0.0`` to return immediately.
+            wait_kwargs: Accepted for API compatibility; not used by ``Head``.
+            exit_on_reach: If ``True``, return as soon as the target positions
+                are reached (subject to ``exit_on_reach_kwargs`` tolerance),
+                rather than waiting the full ``wait_time``.
+            exit_on_reach_kwargs: Optional keyword arguments forwarded to
+                ``is_joint_pos_reached`` (e.g. ``{"tolerance": 0.02}``).
 
         Raises:
-            ValueError: If joint_pos dictionary contains invalid joint names.
+            ValueError: If ``wait_time`` is negative.
+            ValueError: If ``joint_pos`` is a dict with invalid joint names.
         """
         self.set_joint_pos_vel(
             joint_pos,
@@ -129,28 +136,33 @@ class Head(RobotJointComponent):
         exit_on_reach: bool = False,
         exit_on_reach_kwargs: dict[str, float] | None = None,
     ) -> None:
-        """Send control commands to the head.
+        """Send joint position and velocity control commands to the head.
 
         Args:
-            joint_pos: Joint positions as either:
-                - List of joint values [j1, j2]
-                - Numpy array with shape (3,), in radians
-                - Dictionary mapping joint names to position values
-            joint_vel: Optional joint velocities as either:
-                - List of joint values [v1, v2]
-                - Numpy array with shape (3,), in rad/s
-                - Dictionary mapping joint names to velocity values
-                - Single float value to be applied to all joints
-                If None, velocities are calculated based on default velocity setting.
-            relative: If True, the joint positions are relative to the current position.
-            wait_time: Time to wait after sending command in seconds. If 0, returns
-                immediately after sending command.
-            exit_on_reach: If True, the function will exit when the joint positions are reached.
-            exit_on_reach_kwargs: Optional parameters for exit when the joint positions are reached.
+            joint_pos: Target joint positions as either:
+                - A list of 3 floats ``[j1, j2, j3]``, in radians
+                - A numpy array with shape ``(3,)``, in radians
+                - A dict mapping joint names to position values
+            joint_vel: Target joint velocities as either:
+                - A list of 3 floats ``[v1, v2, v3]``, in rad/s
+                - A numpy array with shape ``(3,)``, in rad/s
+                - A dict mapping joint names to velocity values
+                - A single float applied uniformly to all joints
+                If ``None``, velocities are derived from the joint velocity limits
+                and the direction of motion.
+            relative: If ``True``, ``joint_pos`` is interpreted as an offset
+                from the current joint positions.
+            wait_time: Time to wait after sending the command, in seconds.
+                Must be ``>= 0``. Pass ``0.0`` to return immediately.
+            exit_on_reach: If ``True``, return as soon as the target positions
+                are reached (subject to ``exit_on_reach_kwargs`` tolerance),
+                rather than waiting the full ``wait_time``.
+            exit_on_reach_kwargs: Optional keyword arguments forwarded to
+                ``is_joint_pos_reached`` (e.g. ``{"tolerance": 0.02}``).
 
         Raises:
-            ValueError: If wait_time is negative or joint_pos dictionary contains
-                invalid joint names.
+            ValueError: If ``wait_time`` is negative.
+            ValueError: If ``joint_pos`` is a dict with invalid joint names.
         """
         if wait_time < 0.0:
             raise ValueError("wait_time must be greater than or equal to 0")

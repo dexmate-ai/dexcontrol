@@ -169,7 +169,7 @@ class Robot(RobotQueryInterface):
 
         Raises:
             ComponentError: If any critical component fails to become active within timeout.
-            ValueError: If configs cannot be loaded.
+            ConfigurationError: If the communication config is not set or the file is unreadable.
         """
         self._shutdown_called: bool = False
         self._components: list[RobotComponent] = []
@@ -221,7 +221,11 @@ class Robot(RobotQueryInterface):
         return self._robot_name
 
     def __enter__(self) -> "Robot":
-        """Enter context manager."""
+        """Enter context manager.
+
+        Returns:
+            The Robot instance for use in the ``with`` block.
+        """
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -400,7 +404,20 @@ class Robot(RobotQueryInterface):
         logger.info(f"Initialized: {', '.join(initialized_components)}")
 
     def _set_default_state(self) -> None:
-        """Set default control modes for robot components."""
+        """Set default control modes for robot components.
+
+        Skips all control setup if the software E-Stop is active.
+        """
+        if estop := getattr(self, "estop", None):
+            if estop.is_software_estop_enabled():
+                logger.warning(
+                    "Software E-Stop is active. "
+                    "Head cannot be enabled and control features are not functional. "
+                    "Call robot.estop.deactivate() to release the software E-Stop "
+                    "before controlling the robot."
+                )
+                return
+
         for arm in ["left_arm", "right_arm"]:
             if component := getattr(self, arm, None):
                 component.set_modes(["position"] * 7)
@@ -730,9 +747,9 @@ class Robot(RobotQueryInterface):
             relative: Whether positions are relative to current position.
 
         Raises:
-            ValueError: If trajectory is empty or components have different trajectory lengths.
-            ValueError: If trajectory format is invalid.
-            DexcontrolError: If trajectory execution fails.
+            ValueError: If trajectory is empty.
+            DexcontrolError: If trajectory execution fails (including invalid format or
+                inconsistent trajectory lengths).
         """
         if not trajectory:
             raise ValueError("Trajectory must be a non-empty dictionary")
@@ -775,8 +792,7 @@ class Robot(RobotQueryInterface):
             exit_on_reach_kwargs: Optional parameters for exit when the joint positions are reached.
 
         Raises:
-            ValueError: If any component name is invalid.
-            DexcontrolError: If joint position setting fails.
+            DexcontrolError: If joint position setting fails (including invalid component names).
         """
         if wait_kwargs is None:
             wait_kwargs = {}
@@ -876,11 +892,14 @@ class Robot(RobotQueryInterface):
 
         Args:
             joint_pos: Joint positions to compensate.
-            robot: Robot instance.
             part: Component name for which joint positions are being compensated.
+                Valid values are ``"left_arm"``, ``"right_arm"``, and ``"head"``.
 
         Returns:
-            Compensated joint positions.
+            Compensated joint positions as a new numpy array.
+
+        Raises:
+            ValueError: If ``part`` is not one of the supported body parts.
         """
         if self.robot_model == "vega_1u":
             torso_pitch = np.pi / 2
@@ -907,7 +926,15 @@ class Robot(RobotQueryInterface):
         return adjusted_positions
 
     def have_hand(self, side: Literal["left", "right"]) -> bool:
-        """Check if the robot has a hand."""
+        """Check if the robot has a hand on the given side.
+
+        Args:
+            side: Which side to check. Must be ``"left"`` or ``"right"``.
+
+        Returns:
+            True if a hand of a known type is detected on that side, False if
+            the hand type is ``HandType.UNKNOWN``.
+        """
         return self._hand_types.get(side) != HandType.UNKNOWN
 
     def _process_trajectory(

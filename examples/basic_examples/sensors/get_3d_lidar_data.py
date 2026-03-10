@@ -22,9 +22,9 @@ still run and display point cloud statistics.
 import time
 
 import numpy as np
-from dexcontrol.config.vega import get_vega_config
 
 from dexcontrol import Robot
+from dexcontrol.core.config import get_robot_config
 
 # Try to import Open3D
 try:
@@ -182,7 +182,7 @@ def main():
     print("=" * 60)
     print("3D LiDAR Data Access Example")
     print("=" * 60)
-    configs = get_vega_config()
+    configs = get_robot_config()
     configs.enable_sensor("front_lidar_3d")
     with Robot(configs=configs) as robot:
         # Check if 3D lidar is available

@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.4.5] - 2026-03-08
+
+### Added
+
+- **E-Stop boot warning.** `Robot.__init__` now checks whether the software E-Stop is active immediately after initialization. If it is, all control setup is skipped and a clear warning is logged telling the user to call `robot.estop.deactivate()` before controlling the robot. The monitor thread now uses the `monitoring` field instead of `enabled` to control the run loop, matching the actual attribute set during initialization. The previous field name caused the thread to exit immediately on start.
+
+- **Connection benchmark.** New `connect_robot_latency.py` benchmark for measuring robot connection latency.
+
+### Breaking Changes
+
+- **`Robot.__init__` skips control setup when software E-Stop is active.** Previously, all control modes were initialized unconditionally. Now, if the software E-Stop is enabled at startup, control setup is skipped entirely and a warning is logged. Code that initializes `Robot()` while the software E-Stop is active will no longer have functional control — call `robot.estop.deactivate()` first.
+
+### Fixed
+
+- **Outdated docstrings across the core public API.** Audited and corrected all public method docstrings in `component.py`, `robot_query_interface.py`, `robot.py`, `arm.py`, `hand.py`, `head.py`, `chassis.py`, `torso.py`, and `misc.py`. Fixed wrong default values, phantom parameters, inaccurate return type descriptions, and exceptions listed that were never actually raised. Added missing docstrings where none existed.
+- **LIDAR data retrieval no longer calls the removed `get_vega_config`.** `get_lidar_data` was calling `get_vega_config`, which no longer exists. Updated to use `get_robot_config` instead.
+
 ## [0.4.4] - 2026-02-18
 
 ### Fixed

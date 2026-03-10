@@ -52,8 +52,7 @@ class Hand(RobotJointComponent):
 
         Args:
             name: Name of the hand component Node.
-            configs: Hand configuration parameters containing communication topics
-                and predefined hand positions.
+            robot_info: RobotInfo instance providing component config and joint names.
         """
         joint_names = robot_info.get_component_joints(name)
         config = robot_info.get_component_config(name)
@@ -137,6 +136,12 @@ class HandF5D6(Hand):
         name: str,
         robot_info: RobotInfo,
     ) -> None:
+        """Initialize the F5D6 hand controller.
+
+        Args:
+            name: Name of the hand component Node.
+            robot_info: RobotInfo instance providing component config and joint names.
+        """
         super().__init__(name, robot_info)
         config = robot_info.get_component_config(name)
         config = cast(F5D6HandV1Config, config)
@@ -149,7 +154,15 @@ class HandF5D6(Hand):
         exit_on_reach: bool = False,
         exit_on_reach_kwargs: dict[str, Any] | None = None,
     ) -> None:
-        """Close the hand fully using a two-step approach for better control."""
+        """Close the hand fully using a two-step approach for better control.
+
+        Args:
+            wait_time: Time to wait after closing the hand. Defaults to 0.0.
+            exit_on_reach: If True, exit when the joint positions are reached.
+                Defaults to False.
+            exit_on_reach_kwargs: Optional parameters for exit when the joint
+                positions are reached. Defaults to None.
+        """
         try:
             if self.is_joint_pos_reached(self._joint_pos_close, tolerance=0.1):
                 return
@@ -181,7 +194,15 @@ class HandF5D6(Hand):
         exit_on_reach: bool = False,
         exit_on_reach_kwargs: dict[str, Any] | None = None,
     ) -> None:
-        """Open the hand fully using a two-step approach for better control."""
+        """Open the hand fully using a two-step approach for better control.
+
+        Args:
+            wait_time: Time to wait after opening the hand. Defaults to 0.0.
+            exit_on_reach: If True, exit when the joint positions are reached.
+                Defaults to False.
+            exit_on_reach_kwargs: Optional parameters for exit when the joint
+                positions are reached. Defaults to None.
+        """
         try:
             if self.is_joint_pos_reached(self._joint_pos_open, tolerance=0.1):
                 return
@@ -241,7 +262,19 @@ class HandF5D6(Hand):
 
 
 class HandF5D6V2(Hand):
+    """Specialized hand class for the F5D6 V2 hand model with fingertip force sensing.
+
+    Extends the basic Hand class with fingertip force sensor support using the
+    F5D6HandV2Config touch sensor subscriber.
+    """
+
     def __init__(self, name: str, robot_info: RobotInfo) -> None:
+        """Initialize the F5D6 V2 hand controller.
+
+        Args:
+            name: Name of the hand component Node.
+            robot_info: RobotInfo instance providing component config and joint names.
+        """
         super().__init__(name, robot_info)
         config = robot_info.get_component_config(name)
         config = cast(F5D6HandV2Config, config)
@@ -255,7 +288,8 @@ class HandF5D6V2(Hand):
         """Get the force at the finger tips.
 
         Returns:
-            Array of force values at the finger tips.
+            Array of 5 force values at the finger tips, or None if the
+            touch sensor subscriber is not initialized.
         """
         if self._touch_sensor_subscriber is None:
             logger.warning("Touch sensor subscriber not initialized")
@@ -268,11 +302,6 @@ class DexGripper(RobotJointComponent):
 
     This class provides methods to control a robot gripper by publishing commands and
     receiving state information through Zenoh communication.
-
-    Attributes:
-        mode_querier: Zenoh querier for setting gripper mode.
-        default_vel: Default joint velocities for all joints.
-        max_vel: Maximum allowed joint velocities for all joints.
     """
 
     def __init__(
@@ -367,19 +396,23 @@ class DexGripper(RobotJointComponent):
         exit_on_reach: bool = False,
         exit_on_reach_kwargs: dict[str, float] | None = None,
     ) -> None:
-        """Send joint position control commands to the head.
+        """Send joint position control commands to the gripper.
 
         Args:
             joint_pos: Joint positions as either:
-                - List of joint values [j1, j2]
+                - List of joint values [j1, j2, j3]
                 - Numpy array with shape (3,), in radians
                 - Dictionary mapping joint names to position values
             relative: If True, the joint positions are relative to the current position.
+                Defaults to False.
             wait_time: Time to wait after sending command in seconds. If 0, returns
-                immediately after sending command.
-            wait_kwargs: Optional parameters for trajectory generation (not used in Head).
-            exit_on_reach: If True, the function will exit when the joint positions are reached.
-            exit_on_reach_kwargs: Optional parameters for exit when the joint positions are reached.
+                immediately after sending command. Defaults to 0.0.
+            wait_kwargs: Optional parameters for trajectory generation (unused).
+                Defaults to None.
+            exit_on_reach: If True, the function will exit when the joint positions
+                are reached. Defaults to False.
+            exit_on_reach_kwargs: Optional parameters for exit when the joint positions
+                are reached. Defaults to None.
 
         Raises:
             ValueError: If joint_pos dictionary contains invalid joint names.
@@ -406,24 +439,27 @@ class DexGripper(RobotJointComponent):
         exit_on_reach: bool = False,
         exit_on_reach_kwargs: dict[str, float] | None = None,
     ) -> None:
-        """Send control commands to the head.
+        """Send position and velocity control commands to the gripper.
 
         Args:
             joint_pos: Joint positions as either:
-                - List of joint values [j1, j2]
+                - List of joint values [j1, j2, j3]
                 - Numpy array with shape (3,), in radians
                 - Dictionary mapping joint names to position values
             joint_vel: Optional joint velocities as either:
-                - List of joint values [v1, v2]
+                - List of joint values [v1, v2, v3]
                 - Numpy array with shape (3,), in rad/s
                 - Dictionary mapping joint names to velocity values
                 - Single float value to be applied to all joints
                 If None, velocities are calculated based on default velocity setting.
             relative: If True, the joint positions are relative to the current position.
+                Defaults to False.
             wait_time: Time to wait after sending command in seconds. If 0, returns
-                immediately after sending command.
-            exit_on_reach: If True, the function will exit when the joint positions are reached.
-            exit_on_reach_kwargs: Optional parameters for exit when the joint positions are reached.
+                immediately after sending command. Defaults to 0.0.
+            exit_on_reach: If True, the function will exit when the joint positions
+                are reached. Defaults to False.
+            exit_on_reach_kwargs: Optional parameters for exit when the joint positions
+                are reached. Defaults to None.
 
         Raises:
             ValueError: If wait_time is negative or joint_pos dictionary contains
@@ -462,13 +498,13 @@ class DexGripper(RobotJointComponent):
         )
 
     def stop(self) -> None:
-        """Stop the head by setting target position to current position with zero velocity."""
+        """Stop the gripper by setting target position to current position with zero velocity."""
         current_pos = self.get_joint_pos()
         zero_vel = np.zeros(3, dtype=np.float32)
         self.set_joint_pos_vel(current_pos, zero_vel, relative=False, wait_time=0.0)
 
     def shutdown(self) -> None:
-        """Clean up Zenoh resources for the head component."""
+        """Clean up Zenoh resources for the gripper component."""
         self.stop()
         super().shutdown()
         # No need to undeclare queriers when using DexComm

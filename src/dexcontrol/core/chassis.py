@@ -28,10 +28,11 @@ from dexcontrol.core.component import RobotJointComponent
 
 
 class ChassisSteer(RobotJointComponent):
-    """Robot hand control class.
+    """Chassis steering joint controller.
 
-    This class provides methods to control a robotic hand by publishing commands and
-    receiving state information through Zenoh communication.
+    This class provides methods to control the steering joints of a robot's wheeled
+    base by publishing commands and receiving state information through Zenoh
+    communication.
     """
 
     def __init__(
@@ -40,12 +41,12 @@ class ChassisSteer(RobotJointComponent):
         robot_info: RobotInfo,
         configs: Vega1ChassisConfig,
     ) -> None:
-        """Initialize the hand controller.
+        """Initialize the chassis steer controller.
 
         Args:
             name: Name of the chassis steer component Node.
-            configs: Hand configuration parameters containing communication topics
-                and predefined hand positions.
+            robot_info: Robot information object used to retrieve steer joint names.
+            configs: Chassis configuration parameters containing communication topics.
         """
         steer_joint_names = robot_info.get_component_parameter(
             "chassis", "steer_joints"
@@ -62,7 +63,7 @@ class ChassisSteer(RobotJointComponent):
     def _send_position_command(
         self, joint_pos: Float[np.ndarray, " 2"] | list[float]
     ) -> None:
-        """Send joint position control commands to the hand.
+        """Send joint position control commands to the steer joints.
 
         Args:
             joint_pos: Joint positions as list or numpy array.
@@ -85,11 +86,12 @@ class ChassisDrive(RobotJointComponent):
         robot_info: RobotInfo,
         configs: Vega1ChassisConfig,
     ) -> None:
-        """Initialize the base controller.
+        """Initialize the chassis drive controller.
 
         Args:
-            name: Name of the chassis component Node.
-            configs: Base configuration parameters containing communication topics.
+            name: Name of the chassis drive component Node.
+            robot_info: Robot information object used to retrieve drive joint names.
+            configs: Chassis configuration parameters containing communication topics.
         """
         drive_joint_names = robot_info.get_component_parameter(
             "chassis", "drive_joints"
@@ -111,6 +113,11 @@ class ChassisDrive(RobotJointComponent):
     def _send_velocity_command(
         self, joint_vel: Float[np.ndarray, " 2"] | list[float]
     ) -> None:
+        """Send joint velocity control commands to the drive wheels.
+
+        Args:
+            joint_vel: Joint velocities as list or numpy array.
+        """
         joint_vel_array = self._convert_joint_cmd_to_array(joint_vel)
         data = dict(vel=joint_vel_array)
         self._publish_control(control_msg=data)
@@ -137,11 +144,12 @@ class Chassis:
         name: str,
         robot_info: RobotInfo,
     ) -> None:
-        """Initialize the base controller.
+        """Initialize the chassis controller.
 
         Args:
             name: Name of the chassis component Node.
-            configs: Base configuration parameters containing communication topics.
+            robot_info: Robot information object used to retrieve chassis configuration
+                and kinematic parameters.
         """
         config = robot_info.get_component_config(name)
         config = cast(Vega1ChassisConfig, config)
@@ -476,7 +484,11 @@ class Chassis:
 
     @property
     def joint_name(self) -> list[str]:
-        """Get the joint names of the chassis."""
+        """Get the joint names of the chassis.
+
+        Returns:
+            List of joint names in order: steer joints followed by drive joints.
+        """
         return self.chassis_steer.joint_name + self.chassis_drive.joint_name
 
     def get_joint_pos_dict(
@@ -678,7 +690,12 @@ class Chassis:
         return steering_angle, wheel_speed
 
     def is_active(self) -> bool:
-        """Check if the chassis is active."""
+        """Check if the chassis is active.
+
+        Returns:
+            True if both steer and drive components are receiving state updates,
+            False otherwise.
+        """
         return self.chassis_steer.is_active() and self.chassis_drive.is_active()
 
     def wait_for_active(self, timeout: float = 5.0) -> bool:

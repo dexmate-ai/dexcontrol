@@ -11,7 +11,7 @@
 """Miscellaneous robot components module.
 
 This module provides classes for various auxiliary robot components such as Battery,
-EStop (emergency stop), ServerLogSubscriber, and UltraSonicSensor.
+EStop (emergency stop), and Heartbeat.
 """
 
 import os
@@ -55,6 +55,7 @@ class Battery(RobotComponent):
         """Initialize the Battery component.
 
         Args:
+            name: Component name used to look up configuration and create the node.
             robot_info: RobotInfo instance.
         """
         config = robot_info.get_component_config(name)
@@ -223,7 +224,7 @@ class EStop(RobotComponent):
     the software emergency stop.
 
     Attributes:
-        _estop_query_name: Zenoh query name for setting EStop state.
+        _monitoring: Whether the background monitor thread is running.
         _monitor_thread: Background thread for EStop monitoring.
         _shutdown_event: Event to signal thread shutdown.
     """
@@ -236,11 +237,12 @@ class EStop(RobotComponent):
         """Initialize the EStop component.
 
         Args:
+            name: Component name used to look up configuration and create the node.
             robot_info: RobotInfo instance.
         """
         config = robot_info.get_component_config(name)
         config = cast(EStopConfig, config)
-        self._enabled = config.enabled
+        self._monitoring = config.monitoring
         super().__init__(
             name, config.state_sub_topic, state_decoder=EStopStateCodec.decode
         )
@@ -250,7 +252,7 @@ class EStop(RobotComponent):
             response_decoder=None,
             timeout=0.05,
         )
-        if not self._enabled:
+        if not self._monitoring:
             logger.warning("EStop monitoring is DISABLED via configuration")
             return
         self._shutdown_event = threading.Event()
@@ -332,7 +334,12 @@ class EStop(RobotComponent):
         }
 
     def is_button_pressed(self) -> bool:
-        """Checks if the EStop button is pressed."""
+        """Checks if the EStop button is pressed.
+
+        Returns:
+            True if any hardware E-Stop button (left base, right base, torso,
+            or remote) is currently pressed, False otherwise.
+        """
         state = self._subscriber.get_latest()
         if state is None:
             return False
@@ -345,7 +352,11 @@ class EStop(RobotComponent):
         return button_pressed
 
     def is_software_estop_enabled(self) -> bool:
-        """Checks if the software EStop is enabled."""
+        """Checks if the software EStop is enabled.
+
+        Returns:
+            True if the software E-Stop is currently active, False otherwise.
+        """
         state = self._subscriber.get_latest()
         if state is None:
             return False
@@ -365,7 +376,7 @@ class EStop(RobotComponent):
 
     def shutdown(self) -> None:
         """Shuts down the EStop component and stops monitoring thread."""
-        if self._enabled:
+        if self._monitoring:
             self._shutdown_event.set()
             if self._monitor_thread and self._monitor_thread.is_alive():
                 self._monitor_thread.join(timeout=2.0)  # Extended timeout

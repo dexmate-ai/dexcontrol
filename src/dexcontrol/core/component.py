@@ -109,7 +109,11 @@ class RobotComponent:
         return self._subscriber.is_active
 
     def shutdown(self) -> None:
-        """Cleans up Zenoh resources."""
+        """Cleans up communication resources.
+
+        Calls ``stop()`` on the component if the method exists, then shuts
+        down the underlying DexComm node and releases its Zenoh resources.
+        """
         # Stop any ongoing operations if the component has a stop method
         if hasattr(self, "stop"):
             method = getattr(self, "stop")
@@ -127,11 +131,11 @@ class RobotComponent:
             self._node.shutdown()
 
     def get_timestamp_ns(self) -> int:
-        """Get the current timestamp (in nanoseconds) of the most recent state update.
+        """Get the timestamp (in nanoseconds) of the most recent state update.
 
         Returns:
-            The current timestamp in nanoseconds when driver updated the state.
-            We convert the time to client clock by adding the server time offset.
+            Timestamp in nanoseconds as recorded by the robot driver in the
+            most recently received state message.
 
         Raises:
             ServiceUnavailableError: If no state data is available.
@@ -184,6 +188,7 @@ class RobotJointComponent(RobotComponent):
         """Initializes RobotJointComponent.
 
         Args:
+            name: Name of the component node.
             state_sub_topic: Topic to subscribe to for state updates.
             control_pub_topic: Topic to publish control commands.
             control_encoder: Encoder function for control messages
@@ -244,14 +249,26 @@ class RobotJointComponent(RobotComponent):
 
     @property
     def joint_pos_limit(self) -> np.ndarray | None:
-        """Gets the joint limits of the component."""
+        """Gets the joint position limits of the component.
+
+        Returns:
+            Array of shape (N, 2) where each row is [lower_limit, upper_limit]
+            in radians (revolute) or meters (prismatic), or None if no limits
+            were configured.
+        """
         return (
             self._joint_pos_limit.copy() if self._joint_pos_limit is not None else None
         )
 
     @property
     def joint_vel_limit(self) -> np.ndarray | None:
-        """Gets the joint velocity limits of the component."""
+        """Gets the joint velocity limits of the component.
+
+        Returns:
+            Array of shape (N,) containing the maximum speed for each joint
+            in radians/s (revolute) or meters/s (prismatic), or None if no
+            limits were configured.
+        """
         return (
             self._joint_vel_limit.copy() if self._joint_vel_limit is not None else None
         )
@@ -436,7 +453,7 @@ class RobotJointComponent(RobotComponent):
             ValueError: If joint error codes are not available for this component.
         """
         state = self._get_state()
-        if "error" not in state:
+        if not state.get("error"):
             raise ValueError("Joint error codes are not available for this component.")
         joint_err = np.array(state["error"], dtype=np.uint32)
         return self._extract_joint_info(joint_err, joint_id=joint_id)
@@ -465,8 +482,9 @@ class RobotJointComponent(RobotComponent):
             joint_id: Optional ID(s) of specific joints to query.
 
         Returns:
-            Array of joint positions, velocities, and currents.
-            The last dimension corresponds to [positions, velocities, currents].
+            Array of shape (N, 3) where the last dimension is
+            [position, velocity, current] when current data is available, or
+            [position, velocity, torque] when only torque data is available.
 
         Raises:
             ValueError: If joint positions or velocities are not available.
@@ -505,7 +523,9 @@ class RobotJointComponent(RobotComponent):
             joint_id: Optional ID(s) of specific joints to query.
 
         Returns:
-            Dictionary mapping joint names to arrays of [position, velocity, current].
+            Dictionary mapping joint names to arrays of [position, velocity, current]
+            when current data is available, or [position, velocity, torque] when
+            only torque data is available.
 
         Raises:
             ValueError: If joint positions or velocities are not available.
@@ -699,7 +719,7 @@ class RobotJointComponent(RobotComponent):
                 - Dictionary mapping joint names to position values
             relative: If True, the joint positions are relative to the current position.
             wait_time: Time to wait after sending command in seconds.
-            wait_kwargs: Optional parameters for trajectory generation.
+            wait_kwargs: Reserved for future use; currently not applied.
             exit_on_reach: If True, the function will exit when the joint positions are reached.
             exit_on_reach_kwargs: Optional parameters for exit when the joint positions are reached.
 

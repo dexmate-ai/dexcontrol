@@ -167,8 +167,8 @@ def main(fps: float = 30.0, use_rtc: bool = False) -> None:
             print("Warning: Some camera streams may not be active")
 
         # Print camera information nicely
-        # camera_info = robot.sensors.head_camera.camera_info
-        # print_camera_info(camera_info)
+        camera_info = robot.sensors.head_camera.get_camera_info()
+        print_camera_info(camera_info)
 
         # Start live camera visualization
         visualize_camera_data(robot, fps)
