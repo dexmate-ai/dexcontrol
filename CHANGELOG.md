@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-03-10
+
+### Fixed
+
+- `AttributeError: 'EStopConfig' object has no attribute 'monitoring'`. Fix this issue by enforcing new dexbot-utils version.
+
+
+### Dependencies
+
+- Requires `dexcomm >= 0.4.4` (raised from 0.4.2) `dexbot-utils >= 0.4.4` (raised from 0.4.3).
+
 ## [0.4.5] - 2026-03-08
 
 ### Added
