@@ -133,9 +133,14 @@ def visualize_camera_data(robot: Robot, fps: float = 30.0) -> None:
 
     plt.tight_layout()
 
+    # Latency tracking
+    latency_history: dict[str, list[float]] = {sk: [] for sk, _ in available_streams}
+    LATENCY_WINDOW = 100  # rolling window size
+
     def update(_frame: int) -> None:
         camera_data = get_camera_data(robot)
 
+        latency_parts = []
         for axis, (stream_key, title), display in zip(
             axes, available_streams, displays
         ):
@@ -143,25 +148,54 @@ def visualize_camera_data(robot: Robot, fps: float = 30.0) -> None:
             if data is None:
                 continue
 
-            # Extract image and timestamp
+            # Extract image, publish timestamp, and receive timestamp
             if isinstance(data, dict):
                 frame = data.get("data")
-                timestamp_ns = data.get("timestamp")
-                ts_ms = (timestamp_ns / 1e6) if timestamp_ns else None
+                timestamp_ns = data.get("timestamp_ns")
+                receive_time_ns = data.get("receive_time_ns")
             else:
                 frame = data
-                ts_ms = None
+                timestamp_ns = None
+                receive_time_ns = None
 
             if frame is None:
                 continue
 
-            # Update title with shape and timestamp
+            # Compute latency (receive wallclock - publish wallclock)
+            latency_ms = None
+            if (
+                timestamp_ns is not None
+                and timestamp_ns > 0
+                and receive_time_ns is not None
+            ):
+                latency_ms = (receive_time_ns - timestamp_ns) / 1e6
+                history = latency_history[stream_key]
+                history.append(latency_ms)
+                if len(history) > LATENCY_WINDOW:
+                    history.pop(0)
+                avg_ms = sum(history) / len(history)
+                min_ms = min(history)
+                max_ms = max(history)
+                latency_parts.append(
+                    f"{title}: {latency_ms:6.1f}ms "
+                    f"(avg {avg_ms:5.1f} | min {min_ms:5.1f} | max {max_ms:5.1f})"
+                )
+
+            # Update title with shape and latency
             new_title = f"{title}\n{frame.shape}"
-            if ts_ms is not None:
-                new_title += f"\nt={ts_ms:.1f}ms"
+            if latency_ms is not None:
+                new_title += f"\nlatency={latency_ms:.1f}ms"
 
             axis.set_title(new_title)
             display.set_array(frame)
+
+        # Print live latency to terminal
+        if latency_parts:
+            print(
+                "\033[2K\r" + " | ".join(latency_parts),
+                end="",
+                flush=True,
+            )
 
     # Start animation
     _ = animation.FuncAnimation(
@@ -172,6 +206,7 @@ def visualize_camera_data(robot: Robot, fps: float = 30.0) -> None:
         cache_frame_data=False,
     )
     plt.show()
+    print()  # newline after animation ends
 
 
 def _wait_for_camera(camera: Any, name: str, timeout: float = 5.0) -> None:
@@ -234,13 +269,11 @@ def main(fps: float = 30.0, left: bool = True, right: bool = True) -> None:
         print("Waiting for camera streams to become active...")
         if left_camera is not None:
             _wait_for_camera(left_camera, "Left wrist")
-            if hasattr(left_camera, "camera_info"):
-                print_camera_info(left_camera.camera_info, "Left Wrist ZED X One")
+            print_camera_info(left_camera.get_camera_info(), "Left Wrist ZED X One")
 
         if right_camera is not None:
             _wait_for_camera(right_camera, "Right wrist")
-            if hasattr(right_camera, "camera_info"):
-                print_camera_info(right_camera.camera_info, "Right Wrist ZED X One")
+            print_camera_info(right_camera.get_camera_info(), "Right Wrist ZED X One")
 
         # Start live camera visualization
         visualize_camera_data(robot, fps)

@@ -4,13 +4,14 @@
 """Example demonstrating how to access 3D LiDAR point cloud data.
 
 This example shows:
-1. How to initialize and access the 3D LiDAR sensor
+1. How to initialize and access the 3D LiDAR sensor (front or back)
 2. Different ways to retrieve point cloud data
 3. How to access metadata (timestamps, point count, cloud shape)
 4. Fast 3D visualization of point cloud data with Open3D
 
 Run this example:
     python examples/basic_examples/sensors/get_3d_lidar_data.py
+    python examples/basic_examples/sensors/get_3d_lidar_data.py --position back
 
 Note: Requires Open3D for fast visualization. Install with:
     pip install open3d
@@ -20,8 +21,10 @@ still run and display point cloud statistics.
 """
 
 import time
+from typing import Literal
 
 import numpy as np
+import tyro
 
 from dexcontrol import Robot
 from dexcontrol.core.config import get_robot_config
@@ -33,7 +36,7 @@ try:
     HAS_OPEN3D = True
 except ImportError:
     HAS_OPEN3D = False
-    print("⚠️  Open3D not available. Install with: pip install open3d")
+    print("Open3D not available. Install with: pip install open3d")
     print("   Visualization will be skipped, but data access will still work.\n")
 
 
@@ -73,7 +76,7 @@ def visualize_with_open3d_live(lidar_sensor, duration_sec=300, update_rate_hz=10
     ctr.set_front([0.5, -0.3, -0.4])
     ctr.set_up([0, 0, 1])
 
-    print("\n🎨 Open3D Live Viewer Controls:")
+    print("\nOpen3D Live Viewer Controls:")
     print("  - Left mouse: Rotate")
     print("  - Middle mouse: Pan")
     print("  - Scroll: Zoom")
@@ -120,7 +123,7 @@ def visualize_with_open3d_live(lidar_sensor, duration_sec=300, update_rate_hz=10
         print("\nVisualization interrupted by user")
     finally:
         vis.destroy_window()
-        print(f"\n✓ Displayed {frame_count} frames")
+        print(f"\nDisplayed {frame_count} frames")
 
 
 def visualize_with_open3d_snapshot(points, intensity=None):
@@ -167,7 +170,7 @@ def visualize_with_open3d_snapshot(points, intensity=None):
     coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0)
     vis.add_geometry(coord_frame)
 
-    print("\n🎨 Open3D Viewer Controls:")
+    print("\nOpen3D Viewer Controls:")
     print("  - Left mouse: Rotate")
     print("  - Middle mouse: Pan")
     print("  - Scroll: Zoom")
@@ -177,42 +180,53 @@ def visualize_with_open3d_snapshot(points, intensity=None):
     vis.destroy_window()
 
 
-def main():
-    """Main example demonstrating 3D LiDAR data access."""
+def main(position: Literal["front", "back"] = "front") -> None:
+    """Main example demonstrating 3D LiDAR data access.
+
+    Args:
+        position: Which 3D LiDAR to use - "front" or "back" (default: "front")
+    """
+    sensor_key = f"lidar_3d_{position}"
+
     print("=" * 60)
-    print("3D LiDAR Data Access Example")
+    print(f"3D LiDAR Data Access Example ({position})")
     print("=" * 60)
     configs = get_robot_config()
-    configs.enable_sensor("front_lidar_3d")
+
+    if not configs.has_sensor(sensor_key):
+        print(f"{sensor_key} is not available on this robot configuration")
+        return
+
+    configs.enable_sensor(sensor_key)
+
     with Robot(configs=configs) as robot:
-        # Check if 3D lidar is available
-        if not robot.has_sensor("front_lidar_3d"):
-            print("❌ Front 3D LiDAR sensor not available on this robot")
+        if not robot.has_sensor(sensor_key):
+            print(f"{sensor_key} sensor not available on this robot")
             return
 
-        front_lidar_3d = robot.sensors.front_lidar_3d
+        lidar = getattr(robot.sensors, sensor_key)
 
-        print(f"\n3D LiDAR Name: {front_lidar_3d.name}")
+        print(f"\n3D LiDAR Name: {lidar.name}")
         print("Waiting for 3D LiDAR to become active...")
 
         # Wait for sensor to start publishing data
-        if not front_lidar_3d.wait_for_active(timeout=10.0):
-            print("❌ 3D LiDAR did not become active within timeout")
+        if not lidar.wait_for_active(timeout=10.0):
+            print("3D LiDAR did not become active within timeout")
             return
 
-        print("✓ 3D LiDAR is active\n")
+        print("3D LiDAR is active\n")
 
         # Demonstrate different ways to access point cloud data
         for i in range(5):
             print(f"\n--- Scan {i + 1} ---")
 
             # Method 1: Get full observation dictionary
-            obs = front_lidar_3d.get_obs()
+            obs = lidar.get_obs()
             if obs:
                 print(f"Point count: {obs['point_count']}")
                 print(f"Timestamp (ns): {obs['timestamp_ns']}")
                 print(f"Sequence: {obs['sequence']}")
-                print(f"Cloud shape (H×W): {obs['height']}×{obs['width']}")
+                print(f"Cloud shape (HxW): {obs['height']}x{obs['width']}")
                 print(f"Is dense: {obs['is_dense']}")
                 print(f"X range: [{obs['x'].min():.2f}, {obs['x'].max():.2f}] m")
                 print(f"Y range: [{obs['y'].min():.2f}, {obs['y'].max():.2f}] m")
@@ -222,26 +236,26 @@ def main():
                 )
 
             # Method 2: Get points as Nx3 array
-            points = front_lidar_3d.get_points()
+            points = lidar.get_points()
             if points is not None:
                 print(f"\nPoints shape (Nx3): {points.shape}")
                 print(f"Sample points:\n{points[:3]}")
 
             # Method 3: Get points with intensity as Nx4 array
-            points_xyzi = front_lidar_3d.get_points_with_intensity()
+            points_xyzi = lidar.get_points_with_intensity()
             if points_xyzi is not None:
                 print(f"\nPoints+Intensity shape (Nx4): {points_xyzi.shape}")
 
             # Method 4: Get x, y, z separately
-            xyz = front_lidar_3d.get_xyz()
+            xyz = lidar.get_xyz()
             if xyz:
                 x, y, z = xyz
                 print(f"\nSeparate arrays - X: {x.shape}, Y: {y.shape}, Z: {z.shape}")
 
             # Additional metadata
-            point_count = front_lidar_3d.get_point_count()
-            cloud_shape = front_lidar_3d.get_cloud_shape()
-            is_dense = front_lidar_3d.is_dense()
+            point_count = lidar.get_point_count()
+            cloud_shape = lidar.get_cloud_shape()
+            is_dense = lidar.is_dense()
 
             print("\nMetadata:")
             print(f"  Total points: {point_count}")
@@ -255,7 +269,7 @@ def main():
         print("Point Cloud Processing Examples")
         print("=" * 60)
 
-        points = front_lidar_3d.get_points()
+        points = lidar.get_points()
         if points is not None:
             # Example 1: Filter points by distance
             distances = np.linalg.norm(points, axis=1)
@@ -276,8 +290,8 @@ def main():
             print(f"\nDownsampled cloud: {len(downsampled)} points (1/{step})")
 
         # Demonstrate accessing per-point timestamps and ring info
-        point_timestamps = front_lidar_3d.get_point_timestamps()
-        ring_info = front_lidar_3d.get_ring()
+        point_timestamps = lidar.get_point_timestamps()
+        ring_info = lidar.get_ring()
 
         if point_timestamps is not None:
             print(f"\nPer-point timestamps available: {len(point_timestamps)} points")
@@ -293,13 +307,11 @@ def main():
             print("=" * 60)
 
             print("\nStarting live point cloud visualization...")
-            print("The viewer will update in real-time for 30 seconds.")
+            print("The viewer will update in real-time for 300 seconds.")
             print("Close the window or press 'q' to exit early.\n")
 
             # Live visualization for 300 seconds at 10 Hz
-            visualize_with_open3d_live(
-                front_lidar_3d, duration_sec=300, update_rate_hz=10
-            )
+            visualize_with_open3d_live(lidar, duration_sec=300, update_rate_hz=10)
 
         print("\n" + "=" * 60)
         print("Example completed successfully!")
@@ -307,4 +319,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    tyro.cli(main)

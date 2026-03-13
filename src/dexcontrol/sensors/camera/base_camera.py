@@ -38,6 +38,7 @@ from dexcomm.codecs import DepthImageCodec, RGBImageCodec
 from loguru import logger
 
 from dexcontrol.exceptions import ConfigurationError, ServiceUnavailableError
+from dexcontrol.utils.comm_helper import query_json_service
 
 # RTC imports (optional for systems without hardware video support)
 try:
@@ -301,7 +302,8 @@ class StreamSubscriber:
         """Get the most recent frame from the stream.
 
         Returns:
-            For Zenoh: dict with 'data' (np.ndarray) and 'timestamp' (int) keys.
+            For Zenoh: dict with 'data' (np.ndarray), 'timestamp_ns' (int),
+                and 'receive_time_ns' (int, wall-clock when received) keys.
             For RTC: np.ndarray directly (RGB format, uint8).
             None if no data is available.
 
@@ -316,7 +318,7 @@ class StreamSubscriber:
                 # For RTC, return latest from queue
                 return self._latest_frame.copy() if self._latest_frame is not None else None
             else:
-                # For Zenoh, use subscriber's get_latest
+                # For Zenoh, subscriber injects receive_time_ns atomically into decoded dict
                 return self._subscriber.get_latest()
         except Exception as e:
             logger.debug(f"Error getting latest from '{self.stream_name}': {e}")
@@ -441,6 +443,7 @@ class BaseCameraSensor(ABC):
         self._name = name
         self._node: Node | None = None
         self._streams: dict[str, StreamSubscriber] = {}
+        self._camera_info_cache: dict[str, Any] | None = None
 
         # Create DexComm Node for Zenoh subscribers
         try:
@@ -629,6 +632,44 @@ class BaseCameraSensor(ABC):
                 time.sleep(0.1)
             logger.warning(f"'{self._name}': Timeout waiting for any stream")
             return False
+
+    def _setup_camera_info_service(self) -> None:
+        """Query camera info from dexsensor on startup (best-effort)."""
+        service_topic = f"sensors/{self._name}/info"
+        result = self._query_camera_info(service_topic)
+        if result is not None:
+            logger.info(f"Camera info retrieved for '{self._name}' from '{service_topic}'")
+        else:
+            logger.debug(f"Camera info service not available for '{self._name}' at '{service_topic}'")
+
+    def _query_camera_info(self, service_topic: str) -> dict[str, Any] | None:
+        """Query camera info from dexsensor service.
+
+        Args:
+            service_topic: Service topic to query (will be namespace-resolved).
+
+        Returns:
+            Camera information dictionary or None if query fails.
+        """
+        info_dict = query_json_service(service_topic, timeout=2.0, max_retries=1)
+        if info_dict is not None:
+            self._camera_info_cache = info_dict
+        return info_dict
+
+    def get_camera_info(self, force_refresh: bool = False) -> dict[str, Any] | None:
+        """Get camera information from dexsensor.
+
+        Args:
+            force_refresh: If True, forces a new query to the service.
+                          If False, returns cached info if available.
+
+        Returns:
+            Dictionary containing camera information, or None if unavailable.
+        """
+        if force_refresh or self._camera_info_cache is None:
+            service_topic = f"sensors/{self._name}/info"
+            return self._query_camera_info(service_topic)
+        return self._camera_info_cache
 
     @property
     def name(self) -> str:

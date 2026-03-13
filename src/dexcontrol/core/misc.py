@@ -242,7 +242,7 @@ class EStop(RobotComponent):
         """
         config = robot_info.get_component_config(name)
         config = cast(EStopConfig, config)
-        self._monitoring = config.monitoring
+        self._monitoring = config.enabled
         super().__init__(
             name, config.state_sub_topic, state_decoder=EStopStateCodec.decode
         )

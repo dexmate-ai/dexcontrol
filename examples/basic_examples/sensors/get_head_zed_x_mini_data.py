@@ -99,34 +99,60 @@ def visualize_camera_data(robot, fps: float = 30.0):
 
     plt.tight_layout()
 
+    # Latency tracking
+    stream_names = ["left_rgb", "right_rgb", "depth"]
+    latency_history: dict[str, list[float]] = {k: [] for k in stream_names}
+    LATENCY_WINDOW = 100  # rolling window size
+
     def update(frame):
         # Get camera data - simple API call
         camera_data = get_camera_data(robot)
 
         # Update displays
         titles = ["Left RGB", "Right RGB", "Depth"]
-        for i, key in enumerate(["left_rgb", "right_rgb", "depth"]):
+        latency_parts = []
+        for i, key in enumerate(stream_names):
             if key in camera_data and camera_data[key] is not None:
                 data = camera_data[key]
 
-                # Extract image and timestamp if present
+                # Extract image, publish timestamp, and receive timestamp
                 if isinstance(data, dict):
                     img = data.get("data")
-                    timestamp_ns = data.get("timestamp", None)
-                    # Convert nanoseconds to milliseconds for display
-                    timestamp_ms = timestamp_ns / 1e6 if timestamp_ns else None
+                    timestamp_ns = data.get("timestamp_ns")
+                    receive_time_ns = data.get("receive_time_ns")
                 else:
                     img = data
-                    timestamp_ms = None
+                    timestamp_ns = None
+                    receive_time_ns = None
 
                 # Skip if no image data
                 if img is None:
                     continue
 
-                # Update title with shape and timestamp info
+                # Compute latency (receive wallclock - publish wallclock)
+                latency_ms = None
+                if (
+                    timestamp_ns is not None
+                    and timestamp_ns > 0
+                    and receive_time_ns is not None
+                ):
+                    latency_ms = (receive_time_ns - timestamp_ns) / 1e6
+                    history = latency_history[key]
+                    history.append(latency_ms)
+                    if len(history) > LATENCY_WINDOW:
+                        history.pop(0)
+                    avg_ms = sum(history) / len(history)
+                    min_ms = min(history)
+                    max_ms = max(history)
+                    latency_parts.append(
+                        f"{titles[i]:>9s}: {latency_ms:6.1f}ms "
+                        f"(avg {avg_ms:5.1f} | min {min_ms:5.1f} | max {max_ms:5.1f})"
+                    )
+
+                # Update title with shape info
                 title = f"{titles[i]}\n{img.shape}"
-                if timestamp_ms is not None:
-                    title += f"\nt={timestamp_ms:.1f}ms"
+                if latency_ms is not None:
+                    title += f"\nlatency={latency_ms:.1f}ms"
                 axes[i].set_title(title)
 
                 # Process depth image for visualization
@@ -140,11 +166,21 @@ def visualize_camera_data(robot, fps: float = 30.0):
 
                 displays[i].set_array(img)
 
+        # Print live latency to terminal
+        if latency_parts:
+            print(
+                "\033[2K\r"  # clear line
+                + " | ".join(latency_parts),
+                end="",
+                flush=True,
+            )
+
     # Start animation
     _ = animation.FuncAnimation(
         fig, update, interval=int(1000 / fps), blit=False, cache_frame_data=False
     )
     plt.show()
+    print()  # newline after animation ends
 
 
 def main(fps: float = 30.0, use_rtc: bool = False) -> None:

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-03-13
+
+### Added
+
+- **End-to-end latency measurement in camera examples.** `get_head_zed_x_mini_data.py` and `get_wrist_zed_x_one_data.py` now display live publish-to-receive latency per stream (current, rolling avg/min/max) in the terminal and on matplotlib plot titles. Uses `receive_time_ns` from dexcomm v0.4.6 for accurate measurement.
+
+### Changed
+
+- **Camera info service moved to `BaseCameraSensor`.** `_setup_camera_info_service()`, `_query_camera_info()`, and `get_camera_info()` are now in the base class, eliminating duplicate implementations in `ZedCameraSensor` and `ZedXOneCameraSensor`.
+
+### Dependencies
+
+- Requires **dexcomm >= 0.4.6** for `receive_time_ns` in decoded subscriber messages.
+
 ## [0.4.6] - 2026-03-10
 
 ### Fixed
