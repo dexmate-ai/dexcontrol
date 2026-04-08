@@ -36,6 +36,8 @@ except ImportError:
         # Last resort - use default
         print("Using default matplotlib backend")
 
+import time
+
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
@@ -99,10 +101,13 @@ def visualize_camera_data(robot, fps: float = 30.0):
 
     plt.tight_layout()
 
-    # Latency tracking
+    # Latency and FPS tracking
     stream_names = ["left_rgb", "right_rgb", "depth"]
     latency_history: dict[str, list[float]] = {k: [] for k in stream_names}
     LATENCY_WINDOW = 100  # rolling window size
+    frame_count: dict[str, int] = {k: 0 for k in stream_names}
+    fps_start_time = [time.time()]
+    fps_values: dict[str, float] = {k: 0.0 for k in stream_names}
 
     def update(frame):
         # Get camera data - simple API call
@@ -149,8 +154,19 @@ def visualize_camera_data(robot, fps: float = 30.0):
                         f"(avg {avg_ms:5.1f} | min {min_ms:5.1f} | max {max_ms:5.1f})"
                     )
 
-                # Update title with shape info
+                # Track FPS
+                frame_count[key] += 1
+                elapsed = time.time() - fps_start_time[0]
+                if elapsed >= 1.0:
+                    for k in stream_names:
+                        fps_values[k] = frame_count[k] / elapsed
+                        frame_count[k] = 0
+                    fps_start_time[0] = time.time()
+
+                # Update title with shape + FPS info
                 title = f"{titles[i]}\n{img.shape}"
+                if fps_values[key] > 0:
+                    title += f" | {fps_values[key]:.1f} fps"
                 if latency_ms is not None:
                     title += f"\nlatency={latency_ms:.1f}ms"
                 axes[i].set_title(title)
@@ -166,11 +182,18 @@ def visualize_camera_data(robot, fps: float = 30.0):
 
                 displays[i].set_array(img)
 
-        # Print live latency to terminal
+        # Print live FPS and latency to terminal
+        fps_parts = [
+            f"{titles[i]:>9s}: {fps_values[k]:5.1f}fps"
+            for i, k in enumerate(stream_names)
+            if fps_values[k] > 0
+        ]
+        status = " | ".join(fps_parts) if fps_parts else ""
         if latency_parts:
+            status += "  " + " | ".join(latency_parts)
+        if status:
             print(
-                "\033[2K\r"  # clear line
-                + " | ".join(latency_parts),
+                "\033[2K\r" + status,
                 end="",
                 flush=True,
             )

@@ -240,6 +240,35 @@ class StreamSubscriber:
                 f"VideoSubscriber will auto-query from publisher"
             )
 
+        # Auto-detect codec from publisher metadata if not specified
+        if codec.lower() == "auto":
+            try:
+                import json as _json
+                import os
+
+                from dexcomm._core import ServiceClient
+
+                robot_name = os.environ.get("ROBOT_NAME", "")
+                meta_topic = f"{robot_name}/{rtc_channel}/metadata" if robot_name else f"{rtc_channel}/metadata"
+                client = ServiceClient(meta_topic)
+                raw = client.call(b"")
+                metadata = _json.loads(raw)
+                codec = metadata.get("codec", "vp8")
+                if width is None:
+                    width = metadata.get("width")
+                if height is None:
+                    height = metadata.get("height")
+                logger.info(
+                    f"Auto-detected codec '{codec}' for '{self.stream_name}' "
+                    f"(resolution: {width}x{height})"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to auto-detect codec for '{self.stream_name}': {e}. "
+                    f"Defaulting to vp8"
+                )
+                codec = "vp8"
+
         # Map codec string to VideoCodec enum
         codec_map = {
             "vp8": VideoCodec.VP8,
@@ -508,7 +537,7 @@ class BaseCameraSensor(ABC):
                 rtc_channel=config.get("rtc_channel"),
                 width=config.get("width"),
                 height=config.get("height"),
-                codec=config.get("codec", "h264"),
+                codec=config.get("codec", "auto"),
                 buffer_size=config.get("buffer_size", 1),
             )
         except Exception as e:

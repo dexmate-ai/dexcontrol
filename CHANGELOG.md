@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] - 2026-03-29
+
+### Added
+
+- **Auto-detect RTC video codec from publisher** — Camera subscribers query the publisher's metadata to determine the video codec (VP8, H264, H265) instead of hardcoding. Falls back to VP8 if detection fails.
+- **Live FPS display in camera examples** — `get_head_zed_x_mini_data.py` shows per-stream FPS in both matplotlib titles and terminal output. Works for both Zenoh and RTC transport.
+
+### Dependencies
+
+- Requires **dexcomm-video >= 0.4.18** for RTC video streaming support.
+
 ## [0.4.7] - 2026-03-13
 
 ### Added

@@ -293,7 +293,8 @@ class Robot(RobotQueryInterface):
             raise ConfigurationError(
                 f"{COMM_CFG_PATH_ENV_VAR} environment variable not set.\n"
                 f"  Set it with: export {COMM_CFG_PATH_ENV_VAR}="
-                f"~/.dexmate/comm/zenoh/<robot>/zenoh_peer_config.json5"
+                f"~/.dexmate/comm/zenoh/<config>.dzcfg\n"
+                f"  (also supports legacy .json5 config files)"
             )
 
         # Check config file exists and is readable
@@ -312,7 +313,7 @@ class Robot(RobotQueryInterface):
 
         # Attempt to read the file (permission check)
         try:
-            config_path.read_text()
+            config_path.read_bytes()
         except PermissionError as e:
             raise ConfigurationError(
                 f"Cannot read Zenoh config file: {config_path}\n"
