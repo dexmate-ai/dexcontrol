@@ -16,8 +16,6 @@ reads IMU data including acceleration, angular velocity, magnetometer, and orien
 and displays the information in real-time tables.
 """
 
-import time
-
 import numpy as np
 import tyro
 from dexcomm import RateLimiter
@@ -111,19 +109,16 @@ def create_imu_table(imu_data, title):
     return table
 
 
-def display_live_imu_data(robot, fps: float = 100.0):
+def display_live_imu_data(robot):
     """Handle all visualization and live display of IMU data.
 
     Args:
         robot: Robot instance
-        fps: Display update rate in Hz (default: 100.0)
     """
+    fps = 10.0
     console = Console()
     console.print("[bold green]Starting live IMU data display...[/bold green]")
-    console.print(f"[yellow]Display rate: {fps} Hz | Press Ctrl+C to exit[/yellow]")
-
-    update_count = 0
-    start_time = time.time()
+    console.print("[yellow]Press Ctrl+C to exit[/yellow]")
 
     # Create initial display
     initial_layout = Layout()
@@ -138,20 +133,12 @@ def display_live_imu_data(robot, fps: float = 100.0):
     try:
         with Live(initial_layout, console=console, refresh_per_second=fps) as live:
             while True:
-                current_time = time.time()
-                update_count += 1
-                actual_fps = (
-                    update_count / (current_time - start_time)
-                    if current_time > start_time
-                    else 0
-                )
-
                 # Get IMU data using our simple API
                 head_imu_data, chassis_imu_data = get_imu_data(robot)
 
                 # Create updated display
                 status_panel = Panel(
-                    f"Updates: {update_count} | Target: {fps:.1f} Hz | Actual: {actual_fps:.1f} Hz | Press Ctrl+C to exit",
+                    "Press Ctrl+C to exit",
                     title="Status",
                     style="bold blue",
                 )
@@ -179,12 +166,8 @@ def display_live_imu_data(robot, fps: float = 100.0):
         console.print("\n[bold red]Stopping IMU data display...[/bold red]")
 
 
-def main(fps: float = 100.0):
-    """Main function to initialize robot and start live IMU data display.
-
-    Args:
-        fps: Display update rate in Hz (default: 100.0)
-    """
+def main():
+    """Main function to initialize robot and start live IMU data display."""
     # Initialize robot with available IMU sensors enabled
     configs = get_robot_config()
     has_head_imu = configs.has_sensor("head_imu")
@@ -216,7 +199,7 @@ def main(fps: float = 100.0):
             else:
                 print("Warning: Chassis IMU not active")
 
-        display_live_imu_data(robot, fps)
+        display_live_imu_data(robot)
 
 
 if __name__ == "__main__":

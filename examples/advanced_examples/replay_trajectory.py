@@ -313,7 +313,9 @@ def run_replay_loop(
     available_start_pos = {
         part: pos for part, pos in start_pos.items() if robot.has_component(part)
     }
-    robot.set_joint_pos(available_start_pos, wait_time=3.0, exit_on_reach=True)
+    handle = robot.move_to_joint_pos(available_start_pos)
+    assert handle is not None
+    handle.wait(timeout=3.0)
     is_success = True
     try:
         start_time = time.time()
@@ -354,7 +356,7 @@ def run_replay_loop(
                     for part, pos in frame_pos.items()
                     if robot.has_component(part)
                 }
-                robot.set_joint_pos(valid_frame_pos, wait_time=0.0)
+                robot.set_joint_pos(valid_frame_pos)
 
             # Progress update every 3 seconds
             if i % int(hz * 3) == 0:
@@ -451,10 +453,12 @@ def replay_trajectory(
     if robot.has_component("head"):
         init_pose["head"] = robot.head.get_predefined_pose("home")
 
-    robot.set_joint_pos(init_pose, wait_time=5.0, exit_on_reach=True)
+    handle = robot.move_to_joint_pos(init_pose)
+    assert handle is not None
+    handle.wait(timeout=5.0)
 
     if robot.has_component("torso"):
-        robot.torso.go_to_pose("crouch20_medium", wait_time=5.0, exit_on_reach=True)
+        robot.torso.go_to_pose("crouch20_medium", timeout=5.0)
 
     if robot.have_hand("left"):
         robot.left_hand.close_hand()

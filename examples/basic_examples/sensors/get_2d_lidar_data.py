@@ -84,12 +84,12 @@ def print_scan_info(
 def main() -> None:
     """Initializes the robot, retrieves LIDAR data, and displays it."""
     configs = get_robot_config()
-    configs.enable_sensor("lidar")
+    configs.enable_sensor("lidar_2d_front")
     robot = Robot(configs=configs)
 
     try:
         # Get LIDAR scan data
-        scan_data = robot.sensors.lidar.get_obs()
+        scan_data = robot.sensors.lidar_2d_front.get_obs()
         if not scan_data:
             logger.error("Failed to retrieve LIDAR data.")
             return

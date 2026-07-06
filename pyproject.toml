@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dexcontrol"
-version = "0.4.9"
+version = "0.5.0"
 description = "A Python library of Sensing and Control for Dexmate's Robot"
 authors = [{ name = "Dexmate", email = "contact@dexmate.ai" }]
 classifiers = [
@@ -27,8 +27,8 @@ dependencies = [
     "loguru>=0.7.0",
     "jaxtyping>=0.3.0",
     "rich",
-    "dexcomm>=0.4.6",
-    "dexbot-utils>=0.4.5"
+    "dexcomm>=0.6.0,<0.7.0",
+    "dexbot-utils>=0.5.0"
 ]
 requires-python = ">=3.10"
 
@@ -55,7 +55,6 @@ example = [
     "dualsense-controller>=0.3.1",
     "pytransform3d==3.13.0",
     "dexmotion>=0.2.1",
-    "scipy>=1.16.1"
 ]
 
 [project.urls]

@@ -13,6 +13,7 @@ from dexcontrol.core.torso import Torso
 from dexcontrol.sensors import (
     ChassisIMUSensor,
     Lidar3DSensor,
+    RPLidarSensor,
     UltrasonicSensor,
     USBCameraSensor,
     ZedCameraSensor,
@@ -81,6 +82,7 @@ def get_sensor_mapping() -> dict[type[BaseComponentConfig], Any]:
         sensors.ChassisIMUConfig: ChassisIMUSensor,
         sensors.ZedIMUConfig: ZedIMUSensor,
         sensors.Lidar3DConfig: Lidar3DSensor,
+        sensors.RPLidarConfig: RPLidarSensor,
         sensors.UltraSonicConfig: UltrasonicSensor,
     }
     return sensor_mapping

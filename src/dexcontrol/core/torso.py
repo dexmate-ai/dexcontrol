@@ -14,18 +14,21 @@ This module provides the Torso class for controlling a robot torso through Zenoh
 communication. It handles joint position and velocity control and state monitoring.
 """
 
+import warnings
 from typing import cast
 
 import numpy as np
 from dexbot_utils import RobotInfo
 from dexbot_utils.configs.components.vega_1 import Vega1TorsoConfig
-from dexcomm.codecs import JointCmdCodec, JointStateCodec
+from dexcomm.codecs import DictDataCodec, JointCmdCodec, JointStateCodec
 from jaxtyping import Float
+from loguru import logger
 
-from dexcontrol.core.component import RobotJointComponent
+from dexcontrol.core.component import ManagedJointComponent
+from dexcontrol.core.temperature_sensor import TemperatureSensor
 
 
-class Torso(RobotJointComponent):
+class Torso(ManagedJointComponent):
     """Robot torso control class.
 
     Provides joint position and velocity control for the robot torso, publishing
@@ -61,6 +64,23 @@ class Torso(RobotJointComponent):
             pose_pool=config.pose_pool,
         )
         assert self._joint_vel_limit is not None, "joint_vel_limit is not set"
+
+        # Service client for torso auto-idle toggle. Empty payload reads the
+        # current state; a {"enabled": bool} payload writes it.
+        self._idle_mode_querier = self._node.create_service_client(
+            service_name=config.idle_mode_query,
+            request_encoder=DictDataCodec.encode,
+            response_decoder=DictDataCodec.decode,
+            timeout=5.0,
+        )
+
+        # Initialize temperature sensor if configured
+        self.temperature_sensor: TemperatureSensor | None = None
+        if config.temperature_sub_topic:
+            self.temperature_sensor = TemperatureSensor(
+                f"{name}_temperature", config.temperature_sub_topic
+            )
+            self._subcomponents["temperature_sensor"] = self.temperature_sensor
 
     def set_joint_pos_vel(
         self,
@@ -157,6 +177,16 @@ class Torso(RobotJointComponent):
             ValueError: If wait_time is negative or joint_pos dictionary contains
                 invalid joint names.
         """
+        if wait_time > 0.0:
+            warnings.warn(
+                "wait_time in set_joint_pos() is deprecated and will be removed in "
+                "dexcontrol 0.6.0. Use move_to_joint_pos() instead which relies on "
+                "internal controller to handle motion generation, e.g. motion "
+                "smoothing and gravity compensation.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self.set_joint_pos_vel(
             joint_pos,
             joint_vel=None,
@@ -171,6 +201,43 @@ class Torso(RobotJointComponent):
         current_pos = self.get_joint_pos()
         zero_vel = np.zeros(3, dtype=np.float32)
         self.set_joint_pos_vel(current_pos, zero_vel, relative=False, wait_time=0.0)
+
+    def set_idle_mode(self, enabled: bool) -> None:
+        """Enable or disable the torso's auto-idle behaviour.
+
+        When enabled (the default after every robot-server start), the three
+        torso joints may automatically power down when no control commands
+        are arriving. When disabled, the joints stay actively held at the
+        last commanded position.
+
+        Args:
+            enabled: ``True`` to allow auto-idle, ``False`` to keep joints
+                actively held.
+        """
+        if not self._idle_mode_querier.wait_for_service(timeout=5.0):
+            logger.warning(
+                f"{self._node.get_name()}: torso idle-mode service not "
+                "available, command may fail"
+            )
+        self._idle_mode_querier.call({"enabled": enabled})
+
+    def get_idle_mode(self) -> bool | None:
+        """Read the current torso auto-idle setting.
+
+        Returns:
+            ``True`` if all three torso joints currently allow auto-idle,
+            ``False`` if any joint is held active, or ``None`` if the
+            service call fails (e.g., timeout).
+        """
+        if not self._idle_mode_querier.wait_for_service(timeout=5.0):
+            logger.warning(
+                f"{self._node.get_name()}: torso idle-mode service not available"
+            )
+            return None
+        response = self._idle_mode_querier.call(None)
+        if not response:
+            return None
+        return response.get("enabled")
 
     @property
     def pitch_angle(self) -> float:
@@ -191,7 +258,6 @@ class Torso(RobotJointComponent):
 
     def shutdown(self) -> None:
         """Clean up Zenoh resources for the torso component."""
-        self.stop()
         super().shutdown()
 
     def _process_joint_velocities(

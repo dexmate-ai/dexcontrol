@@ -24,22 +24,22 @@ from dexcontrol.robot import Robot
 
 def main(
     pose: str = "L_shape",
-    arm_side: str = "left",
+    side: str = "left",
     comp_pitch: bool = False,
 ) -> None:
     """Moves the specified robot arm to a predefined pose.
 
     Args:
         pose: Name of the predefined pose to move to.
-        arm_side: Which arm to move ('left' or 'right').
+        side: Which arm to move ('left' or 'right').
         comp_pitch: Whether to compensate for torso pitch angle.
 
     Raises:
-        ValueError: If arm_side is not 'left' or 'right'.
+        ValueError: If side is not 'left' or 'right'.
     """
     # Validate input parameters
-    if arm_side not in ["left", "right"]:
-        raise ValueError("arm_side must be either 'left' or 'right'")
+    if side not in ["left", "right"]:
+        raise ValueError("side must be either 'left' or 'right'")
 
     # Safety confirmation
     logger.warning(
@@ -52,23 +52,22 @@ def main(
 
     # Initialize robot and get specified arm
     bot = Robot()
-    arm = bot.left_arm if arm_side == "left" else bot.right_arm
+    arm = bot.left_arm if side == "left" else bot.right_arm
 
     try:
-        logger.info(f"Moving {arm_side} arm to {pose} position")
+        logger.info(f"Moving {side} arm to {pose} position")
+        arm_pose = arm.get_predefined_pose(pose)
         if comp_pitch:
-            # Adjust pose for torso pitch and move
-            torso_pitch = bot.torso.pitch_angle
-            logger.debug(f"Current torso pitch: {torso_pitch:.4f} rad")
-
-            adjusted_pose = bot.compensate_torso_pitch(
-                arm.get_predefined_pose(pose),
-                "left_arm" if arm_side == "left" else "right_arm",
+            arm_pose = bot.compensate_torso_pitch(
+                arm_pose, "left_arm" if side == "left" else "right_arm"
             )
-            arm.set_joint_pos(adjusted_pose, wait_time=6.0)
-        else:
-            # Move directly to predefined pose
-            arm.go_to_pose(pose, wait_time=6.0)
+        handle = arm.move_to_joint_pos(arm_pose)
+        assert handle is not None
+        result = handle.wait(timeout=6.0)
+        if result != "finished":
+            logger.error(
+                f"Motion ended with state: {result}, message: {handle.message}"
+            )
     finally:
         logger.info("Shutting down robot")
         bot.shutdown()

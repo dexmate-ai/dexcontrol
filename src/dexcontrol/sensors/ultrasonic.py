@@ -15,11 +15,16 @@ Raw API for distance measurements.
 """
 
 import numpy as np
-from dexcomm import Node
 from dexcomm.codecs import UltrasonicStateCodec
 
+from dexcontrol.core.shared_node import get_shared_node
+from dexcontrol.core.subscription_policy import (
+    SubscriptionPolicyManager,
+    SubscriptionPolicyMixin,
+)
 
-class UltrasonicSensor:
+
+class UltrasonicSensor(SubscriptionPolicyMixin):
     """Ultrasonic sensor using DexComm subscriber.
 
     This sensor provides distance measurements from ultrasonic sensors
@@ -36,7 +41,7 @@ class UltrasonicSensor:
             configs: Configuration for the ultrasonic sensor.
         """
         self._name = name
-        self._node = Node(name=self._name)
+        self._node = get_shared_node()
 
         # Create the protobuf subscriber using our clean DexComm integration
         self._subscriber = self._node.create_subscriber(
@@ -44,6 +49,10 @@ class UltrasonicSensor:
             callback=None,
             decoder=UltrasonicStateCodec.decode,
         )
+        self._policy_manager = SubscriptionPolicyManager(
+            self._subscriber, name=self._name
+        )
+        self._subcomponents: dict[str, object] = {}
 
     def shutdown(self) -> None:
         """Shutdown the ultrasonic sensor."""
@@ -55,7 +64,7 @@ class UltrasonicSensor:
         Returns:
             True if receiving data, False otherwise.
         """
-        data = self._subscriber.get_latest()
+        data = self._policy_manager.get_latest_managed()
         return data is not None
 
     def wait_for_active(self, timeout: float = 5.0) -> bool:
@@ -80,8 +89,9 @@ class UltrasonicSensor:
             Numpy array of distances in meters with shape (4,) in the order:
             [front_left, front_right, back_left, back_right].
         """
-        data = self._subscriber.get_latest()
-        if data is not None:
+        msg = self._policy_manager.get_latest_managed()
+        if msg is not None:
+            data = msg.data
             obs = [
                 data['front_left'],
                 data['front_right'],

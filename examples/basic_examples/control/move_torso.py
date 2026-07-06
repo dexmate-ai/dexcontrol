@@ -38,7 +38,7 @@ def main() -> None:
     with Robot() as bot:
         # Move to intermediate crouching position
         if not bot.torso.is_pose_reached("crouch45_medium"):
-            bot.torso.go_to_pose("crouch45_medium", wait_time=4)
+            bot.torso.go_to_pose("crouch45_medium", timeout=4)
 
         # Move to target joint angles (60, 120, 30 degrees)
         target_angles = np.deg2rad([60, 120, 30])

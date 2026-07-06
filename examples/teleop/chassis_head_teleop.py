@@ -92,7 +92,9 @@ class ChassisVelocityTeleopNode(DualSenseTeleopBase):
         # Initialize head position
         home_pose = self.bot.head.get_predefined_pose("home")
         target_pos = self.bot.compensate_torso_pitch(home_pose, "head")
-        self.bot.head.set_joint_pos(target_pos, wait_time=2.0)
+        # Head motion is fire-and-forget: send the target and continue without
+        # waiting for the head to converge.
+        self.bot.head.move_joint_pos(target_pos)
         self._head_enabled = True
         self._head_qpos = self.bot.head.get_joint_pos()
 
@@ -310,7 +312,6 @@ class ChassisVelocityTeleopNode(DualSenseTeleopBase):
                     vx=self._vx,
                     vy=self._vy,
                     wz=self._wz,
-                    sequential_steering=abs(self._vy) > self._velocity_threshold,
                 )
 
             limiter.sleep()

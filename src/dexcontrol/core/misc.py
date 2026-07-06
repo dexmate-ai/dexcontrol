@@ -28,14 +28,15 @@ from dexbot_utils.configs.components.vega_1 import (
 from dexcomm import HeartbeatMonitor
 from dexcomm.codecs import (
     BMSStateCodec,
+    DictDataCodec,
     EStopStateCodec,
-    SoftwareEstopCodec,
 )
 from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
 from dexcontrol.core.component import RobotComponent
+from dexcontrol.core.subscription_policy import SubscriptionPolicy
 
 
 class Battery(RobotComponent):
@@ -63,6 +64,7 @@ class Battery(RobotComponent):
         super().__init__(
             name, config.state_sub_topic, state_decoder=BMSStateCodec.decode
         )
+        self._policy_manager.set_policy(SubscriptionPolicy.ALWAYS_ON)
         self._console = Console()
         self._shutdown_event = threading.Event()
         self._monitor_thread = threading.Thread(
@@ -75,15 +77,15 @@ class Battery(RobotComponent):
         # Wait for first data to arrive before monitoring to avoid false warnings
         # Battery topic publishes at low frequency, so allow generous timeout
         while not self._shutdown_event.is_set():
-            if self._subscriber.get_latest() is not None:
+            if self._policy_manager.get_latest_managed() is not None:
                 break
             self._shutdown_event.wait(0.5)
 
         while not self._shutdown_event.is_set():
             try:
-                state = self._subscriber.get_latest()
-                if state is not None:
-                    battery_level = float(state["percentage"])
+                msg = self._policy_manager.get_latest_managed()
+                if msg is not None:
+                    battery_level = float(msg.data["percentage"])
                     if battery_level < 20:
                         logger.warning(
                             f"Battery level is low ({battery_level:.1f}%). "
@@ -106,8 +108,8 @@ class Battery(RobotComponent):
                 - voltage: Battery voltage
                 - power: Power consumption in Watts
         """
-        state = self._subscriber.get_latest()
-        if state is None:
+        msg = self._subscriber.get_latest()
+        if msg is None:
             return {
                 "percentage": 0.0,
                 "temperature": 0.0,
@@ -115,6 +117,7 @@ class Battery(RobotComponent):
                 "voltage": 0.0,
                 "power": 0.0,
             }
+        state = msg.data
         return {
             "percentage": float(state["percentage"]),
             "temperature": float(state["temperature"]),
@@ -125,17 +128,18 @@ class Battery(RobotComponent):
 
     def show(self) -> None:
         """Displays the current battery status as a formatted table with color indicators."""
-        state = self._subscriber.get_latest()
+        msg = self._subscriber.get_latest()
 
         table = Table(title="Battery Status")
         table.add_column("Parameter", style="cyan")
         table.add_column("Value")
 
-        if state is None:
+        if msg is None:
             table.add_row("Status", "[red]No battery data available[/]")
             self._console.print(table)
             return
 
+        state = msg.data
         battery_style = self._get_battery_level_style(state["percentage"])
         table.add_row(
             "Battery Level", f"[{battery_style}]{state['percentage']:.1f}%[/]"
@@ -246,10 +250,11 @@ class EStop(RobotComponent):
         super().__init__(
             name, config.state_sub_topic, state_decoder=EStopStateCodec.decode
         )
+        self._policy_manager.set_policy(SubscriptionPolicy.ALWAYS_ON)
         self._estop_querier = self._node.create_service_client(
             service_name=config.estop_query_name,
-            request_encoder=SoftwareEstopCodec.encode,
-            response_decoder=None,
+            request_encoder=DictDataCodec.encode,
+            response_decoder=DictDataCodec.decode,
             timeout=0.05,
         )
         if not self._monitoring:
@@ -269,8 +274,9 @@ class EStop(RobotComponent):
 
         while not self._shutdown_event.is_set():
             try:
-                state = self._subscriber.get_latest()
-                if state is not None:
+                msg = self._subscriber.get_latest()
+                if msg is not None:
+                    state = msg.data
                     button_pressed = (
                         state.get("left_base_estop_enabled", False)
                         or state.get("right_base_estop_enabled", False)
@@ -305,7 +311,18 @@ class EStop(RobotComponent):
             )
 
         query_msg = {"enabled": enable}
-        self._estop_querier.call(query_msg)
+        response = self._estop_querier.call(query_msg)
+        if not response:
+            logger.error(
+                f"Failed to set E-Stop to {enable}: no response from service "
+                "(timeout or unreachable). The robot may NOT be in the expected "
+                "E-Stop state."
+            )
+            return
+        if not response.get("success", False):
+            error_msg = response.get("message", "Unknown error")
+            logger.error(f"Failed to set E-Stop to {enable}: {error_msg}")
+            return
         logger.info(f"Set E-Stop to {enable}")
 
     def get_status(self) -> dict[str, bool]:
@@ -316,12 +333,13 @@ class EStop(RobotComponent):
                 - button_pressed: EStop button pressed
                 - software_estop_enabled: Software EStop enabled
         """
-        state = self._subscriber.get_latest()
-        if state is None:
+        msg = self._subscriber.get_latest()
+        if msg is None:
             return {
                 "button_pressed": False,
                 "software_estop_enabled": False,
             }
+        state = msg.data
         button_pressed = (
             state.get("left_base_estop_enabled", False)
             or state.get("right_base_estop_enabled", False)
@@ -340,9 +358,10 @@ class EStop(RobotComponent):
             True if any hardware E-Stop button (left base, right base, torso,
             or remote) is currently pressed, False otherwise.
         """
-        state = self._subscriber.get_latest()
-        if state is None:
+        msg = self._subscriber.get_latest()
+        if msg is None:
             return False
+        state = msg.data
         button_pressed = (
             state.get("left_base_estop_enabled", False)
             or state.get("right_base_estop_enabled", False)
@@ -357,10 +376,10 @@ class EStop(RobotComponent):
         Returns:
             True if the software E-Stop is currently active, False otherwise.
         """
-        state = self._subscriber.get_latest()
-        if state is None:
+        msg = self._subscriber.get_latest()
+        if msg is None:
             return False
-        return state["software_estop_enabled"]
+        return msg.data["software_estop_enabled"]
 
     def activate(self) -> None:
         """Activates the software emergency stop (E-Stop)."""

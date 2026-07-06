@@ -25,19 +25,19 @@ from rich.table import Table
 from dexcontrol.robot import Robot
 
 
-def create_wrench_table(bot, arm_side: str) -> Table:
+def create_wrench_table(bot, side: str) -> Table:
     """Create a table with force/torque sensor values.
 
     Args:
         bot: Robot instance containing arm sensors.
-        arm_side: Side of the arm to read from ('left' or 'right').
+        side: Side of the arm to read from ('left' or 'right').
 
     Returns:
         Rich Table object containing formatted sensor data.
     """
-    arm = bot.left_arm if arm_side == "left" else bot.right_arm
+    arm = bot.left_arm if side == "left" else bot.right_arm
 
-    table = Table(title=f"{arm_side.upper()} ARM FORCE/TORQUE SENSOR")
+    table = Table(title=f"{side.upper()} ARM FORCE/TORQUE SENSOR")
     table.add_column("Component", style="cyan", no_wrap=True)
     table.add_column("Value", style="magenta")
     table.add_column("Unit", style="green")
@@ -56,11 +56,11 @@ def create_wrench_table(bot, arm_side: str) -> Table:
     return table
 
 
-def main(arm_side: str = "left") -> None:
+def main(side: str = "left") -> None:
     """Display force/torque sensor information in real-time.
 
     Args:
-        arm_side: Side of the arm to monitor ('left' or 'right').
+        side: Side of the arm to monitor ('left' or 'right').
 
     Raises:
         KeyboardInterrupt: Gracefully handles user interruption and shuts down robot.
@@ -72,7 +72,7 @@ def main(arm_side: str = "left") -> None:
     try:
         with Live(console=console, refresh_per_second=20) as live:
             while True:
-                table = create_wrench_table(bot, arm_side)
+                table = create_wrench_table(bot, side)
                 live.update(table)
                 time.sleep(0.05)
     except KeyboardInterrupt:

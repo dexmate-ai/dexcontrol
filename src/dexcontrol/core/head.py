@@ -15,6 +15,7 @@ communication. It handles joint position and velocity control, mode setting, and
 state monitoring.
 """
 
+import warnings
 from typing import Literal, cast
 
 import numpy as np
@@ -30,10 +31,11 @@ from dexcomm.codecs import (
 from jaxtyping import Float
 from loguru import logger
 
-from dexcontrol.core.component import RobotJointComponent
+from dexcontrol.core.component import ManagedJointComponent
+from dexcontrol.core.temperature_sensor import TemperatureSensor
 
 
-class Head(RobotJointComponent):
+class Head(ManagedJointComponent):
     """Robot head control class.
 
     Provides methods to control a 3-DOF robot head by publishing joint commands
@@ -81,6 +83,14 @@ class Head(RobotJointComponent):
         )
         assert self._joint_vel_limit is not None, "joint_vel_limit is not set"
 
+        # Initialize temperature sensor if configured
+        self.temperature_sensor: TemperatureSensor | None = None
+        if config.temperature_sub_topic:
+            self.temperature_sensor = TemperatureSensor(
+                f"{name}_temperature", config.temperature_sub_topic
+            )
+            self._subcomponents["temperature_sensor"] = self.temperature_sensor
+
     def set_joint_pos(
         self,
         joint_pos: Float[np.ndarray, "3"] | list[float] | dict[str, float],
@@ -114,6 +124,16 @@ class Head(RobotJointComponent):
             ValueError: If ``wait_time`` is negative.
             ValueError: If ``joint_pos`` is a dict with invalid joint names.
         """
+        if wait_time > 0.0:
+            warnings.warn(
+                "wait_time in set_joint_pos() is deprecated and will be removed in "
+                "dexcontrol 0.6.0. Use move_to_joint_pos() instead which relies on "
+                "internal controller to handle motion generation, e.g. motion "
+                "smoothing and gravity compensation.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self.set_joint_pos_vel(
             joint_pos,
             joint_vel=None,
@@ -242,9 +262,7 @@ class Head(RobotJointComponent):
 
     def shutdown(self) -> None:
         """Clean up Zenoh resources for the head component."""
-        self.stop()
         super().shutdown()
-        # No need to undeclare queriers when using DexComm
 
     def _process_joint_velocities(
         self,

@@ -23,7 +23,6 @@ import numpy as np
 from dexbot_utils import RobotInfo
 from dexbot_utils.configs import BaseRobotConfig
 from dexbot_utils.hand import HandType
-from dexcomm import Node
 
 # Use DexComm for all communication
 from dexcomm.codecs import (
@@ -35,11 +34,9 @@ from dexcomm.codecs import (
 )
 from loguru import logger
 
+from dexcontrol.core.shared_node import acquire_shared_node
 from dexcontrol.exceptions import RobotConnectionError, ServiceUnavailableError
-from dexcontrol.utils.pb_utils import (
-    ComponentStatus,
-)
-from dexcontrol.utils.viz_utils import show_component_status
+from dexcontrol.utils.viz_utils import ComponentStatus, show_component_status
 
 
 class RobotQueryInterface:
@@ -66,7 +63,10 @@ class RobotQueryInterface:
         """
         # Session parameter kept for compatibility but not used
         self._configs = configs
-        self._node = Node(name="dexmate_robot")
+        # Register as a top-level owner of the shared Node so it is only torn
+        # down once every owner releases it. Balanced in _release_shared_node().
+        self._node_released = False
+        self._node = acquire_shared_node()
         self._hand_querier = self._node.create_service_client(
             service_name=configs.querables["hand_info"],
             request_encoder=None,
@@ -126,13 +126,28 @@ class RobotQueryInterface:
 
         return instance
 
-    def close(self) -> None:
-        """Close the communication session if owned by this instance.
+    def _release_shared_node(self) -> None:
+        """Release this instance's hold on the shared Node exactly once.
 
-        This method should be called when done using a standalone
-        RobotQueryInterface to properly clean up resources.
+        Idempotent so that calling both ``shutdown()`` (on Robot) and
+        ``close()`` does not double-release and tear the Node out from under
+        other live owners.
         """
-        self._node.shutdown()
+        if getattr(self, "_node_released", False):
+            return
+        self._node_released = True
+        from dexcontrol.core.shared_node import shutdown_shared_node
+
+        shutdown_shared_node()
+
+    def close(self) -> None:
+        """Release this instance's hold on the shared communication Node.
+
+        This should be called when done using a standalone
+        RobotQueryInterface. The shared Node is only fully shut down once every
+        live owner (Robot / RobotQueryInterface) in the process has released it.
+        """
+        self._release_shared_node()
 
     def __enter__(self) -> "RobotQueryInterface":
         """Enter context manager."""
@@ -428,7 +443,13 @@ class RobotQueryInterface:
         from rich.table import Table
 
         console = Console()
-        table = Table(title="🤖 Robot System Version Information")
+        pkg_version = version_info.get("version", "")
+        title = (
+            f"🤖 Robot System Version Information (firmware v{pkg_version})"
+            if pkg_version
+            else "🤖 Robot System Version Information"
+        )
+        table = Table(title=title)
 
         table.add_column("Component", justify="left", style="cyan", no_wrap=True)
         table.add_column("Hardware Ver.", justify="center", style="magenta")
@@ -454,4 +475,5 @@ class RobotQueryInterface:
                     else "N/A",
                 )
 
+        console.print()
         console.print(table)

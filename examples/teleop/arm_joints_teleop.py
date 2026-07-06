@@ -74,9 +74,7 @@ class JointTeleopNode(BaseArmTeleopNode):
         """
         if self.MIN_JOINT_NUMBER <= idx <= self.MAX_JOINT_NUMBER:
             self.current_joint_idx = idx
-            logger.info(
-                f"Selected joint: {self.current_joint_idx} for {self.arm_side} arm"
-            )
+            logger.info(f"Selected joint: {self.current_joint_idx} for {self.side} arm")
 
     def all_time_loop(self) -> None:
         """Main loop that sets up controller callbacks and runs continuously.
@@ -135,7 +133,7 @@ class JointTeleopNode(BaseArmTeleopNode):
         if not self.safe_pressed or estop_on or not self.active_buttons:
             return
 
-        arm = self.arms[self.arm_side]
+        arm = self.arms[self.side]
         current_position = arm.get_joint_pos()
         new_position = current_position.copy()
 
@@ -150,7 +148,7 @@ class JointTeleopNode(BaseArmTeleopNode):
             return
 
         # Create joint position dictionary with the arm prefix
-        arm_prefix = "L" if self.arm_side == "left" else "R"
+        arm_prefix = "L" if self.side == "left" else "R"
         new_joint_pos_dict = {
             f"{arm_prefix}_arm_j{self.current_joint_idx + 1}": (
                 new_position[self.current_joint_idx]
@@ -169,7 +167,7 @@ class JointTeleopNode(BaseArmTeleopNode):
 
         # Update the target joint position
         with self.arm_motion_lock:
-            self.arm_target_qpos[self.arm_side] = np.array(new_joint_pos)
+            self.arm_target_qpos[self.side] = np.array(new_joint_pos)
 
     def on_joint_selection(self) -> None:
         """Handle joint selection based on button presses and L2 modifier.

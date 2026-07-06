@@ -15,21 +15,62 @@ Raw API for communication. It includes RobotComponent for state-only components
 and RobotJointComponent for components that also support control commands.
 """
 
+import itertools
+import json
+import random
+import threading
 import time
+import warnings
+from collections.abc import Iterator
 from typing import Any, Callable, Mapping, TypeVar
 
 import numpy as np
-from dexcomm import Node
 from jaxtyping import Float
 from loguru import logger
 
+from dexcontrol.core.motion_handle import MotionHandle
+from dexcontrol.core.shared_node import get_shared_node
+from dexcontrol.core.subscription_policy import (
+    SubscriptionPolicyManager,
+    SubscriptionPolicyMixin,
+)
 from dexcontrol.exceptions import ServiceUnavailableError
 
 # Type variable for Message subclasses
 M = TypeVar("M")
 
 
-class RobotComponent:
+class MotionPluginManaged:
+    """Marker mixin for components that communicate with the motion plugin.
+
+    The *motion plugin* is the robot's internal motion controller: a plugin
+    that runs on the robot itself (inside the robot-server process), not in
+    this client library. It receives the targets/trajectories published by
+    these components, generates the actual motion (trajectory smoothing,
+    gravity compensation, convergence detection) and streams the resulting
+    commands to the hardware. The methods here only encode and publish
+    requests over DexComm; all motion generation happens on the robot.
+
+    Subclasses are responsible for owning their target publisher, status
+    subscriber (if any), motion-id counter, and shutdown cleanup. This
+    mixin exists for isinstance discrimination (e.g., Robot-level fan-outs
+    and validation) and to document the relationship.
+
+    The mixin has no ``__init__``, no instance state, and only a static
+    helper for generating a per-component motion_id sequence.
+    """
+
+    @staticmethod
+    def _new_motion_id_counter() -> Iterator[int]:
+        """Return a motion_id sequence starting from a random base.
+
+        A random start reduces the risk of colliding motion_ids when a
+        new client process attaches to the same plugin session.
+        """
+        return itertools.count(start=random.randint(1, 2**32 - 1))
+
+
+class RobotComponent(SubscriptionPolicyMixin):
     """Base class for robot components with state interface.
 
     A component represents a physical part of the robot that maintains state through
@@ -59,16 +100,16 @@ class RobotComponent:
             state_decoder: Decoder function for state messages.
         """
         super().__init__()
-        self._node = Node(
-            name=name,
-        )
+        self._node = get_shared_node()
         # No callback - use Rust-side storage for zero GIL contention
         self._subscriber = self._node.create_subscriber(
             topic=state_sub_topic,
             decoder=state_decoder,
         )
+        self._policy_manager = SubscriptionPolicyManager(self._subscriber, name=name)
+        self._subcomponents: dict[str, "RobotComponent"] = {}
 
-    def _get_state(self) -> Any:
+    def get_state(self) -> Any:
         """Gets the current state of the component.
 
         Returns:
@@ -77,12 +118,12 @@ class RobotComponent:
         Raises:
             ServiceUnavailableError: If no state data has been received yet.
         """
-        state = self._subscriber.get_latest()
-        if state is None:
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
             raise ServiceUnavailableError(
                 f"No state data available for {self.__class__.__name__}"
             )
-        return state
+        return msg.data
 
     def wait_for_active(self, timeout: float = 5.0) -> bool:
         """Waits for the component to start receiving state updates.
@@ -106,29 +147,22 @@ class RobotComponent:
         Returns:
             True if component is active, False otherwise.
         """
-        return self._subscriber.is_active
+        return self._policy_manager.is_active()
 
     def shutdown(self) -> None:
-        """Cleans up communication resources.
+        """Release communication resources (subscriber).
 
-        Calls ``stop()`` on the component if the method exists, then shuts
-        down the underlying DexComm node and releases its Zenoh resources.
+        This method only handles infrastructure cleanup. Application-level
+        graceful stop (e.g. disabling motors) should be done by calling
+        ``stop()`` separately before ``shutdown()``.  ``Robot.shutdown()``
+        handles this — it calls ``stop()`` on active components, then
+        ``shutdown()`` on all components.
+
+        The shared Node is not shut down here — ``Robot.shutdown()`` calls
+        ``shutdown_shared_node()`` as the final cleanup step.
         """
-        # Stop any ongoing operations if the component has a stop method
-        if hasattr(self, "stop"):
-            method = getattr(self, "stop")
-            if callable(method):
-                try:
-                    method()
-                except Exception as e:
-                    # During shutdown, stop() methods may fail due to inactive subscribers
-                    logger.debug(
-                        f"Error during stop() for {self.__class__.__name__}: {e}"
-                    )
-
-        # Shutdown subscriber to release resources
-        if hasattr(self, "_node") and self._node:
-            self._node.shutdown()
+        if hasattr(self, "_subscriber") and self._subscriber:
+            self._subscriber.shutdown()
 
     def get_timestamp_ns(self) -> int:
         """Get the timestamp (in nanoseconds) of the most recent state update.
@@ -140,7 +174,7 @@ class RobotComponent:
         Raises:
             ServiceUnavailableError: If no state data is available.
         """
-        return self._get_state()["timestamp_ns"]
+        return self.get_state()["timestamp_ns"]
 
 
 class RobotJointComponent(RobotComponent):
@@ -200,6 +234,7 @@ class RobotJointComponent(RobotComponent):
         """
         super().__init__(name, state_sub_topic, state_decoder)
 
+        self._control_pub_topic = control_pub_topic
         self._publisher = self._node.create_publisher(
             topic=control_pub_topic,
             encoder=control_encoder,
@@ -221,9 +256,11 @@ class RobotJointComponent(RobotComponent):
         """
         # DexComm publisher with protobuf encoder handles this
         self._publisher.publish(control_msg)
+        # Reset idle timer — controlling a component means we need its state feedback
+        self._policy_manager.touch()
 
     def shutdown(self) -> None:
-        """Cleans up all communication resources."""
+        """Cleans up the raw control publisher (and the inherited subscriber)."""
         super().shutdown()
         try:
             if hasattr(self, "_publisher") and self._publisher:
@@ -322,7 +359,7 @@ class RobotJointComponent(RobotComponent):
         Raises:
             ValueError: If joint positions are not available for this component.
         """
-        state = self._get_state()
+        state = self.get_state()
         if "pos" not in state:
             raise ValueError("Joint positions are not available for this component.")
         joint_pos = np.array(state["pos"], dtype=np.float32)
@@ -360,7 +397,7 @@ class RobotJointComponent(RobotComponent):
         Raises:
             ValueError: If joint velocities are not available for this component.
         """
-        state = self._get_state()
+        state = self.get_state()
         if "vel" not in state:
             raise ValueError("Joint velocities are not available for this component.")
         joint_vel = np.array(state["vel"], dtype=np.float32)
@@ -397,7 +434,7 @@ class RobotJointComponent(RobotComponent):
         Raises:
             ValueError: If joint currents are not available for this component.
         """
-        state = self._get_state()
+        state = self.get_state()
         if "cur" not in state:
             raise ValueError("Joint currents are not available for this component.")
         joint_cur = np.array(state["cur"], dtype=np.float32)
@@ -417,7 +454,7 @@ class RobotJointComponent(RobotComponent):
         Raises:
             ValueError: If joint torques are not available for this component.
         """
-        state = self._get_state()
+        state = self.get_state()
         if "torque" not in state:
             raise ValueError("Joint torques are not available for this component.")
         joint_torque = np.array(state["torque"], dtype=np.float32)
@@ -452,7 +489,7 @@ class RobotJointComponent(RobotComponent):
         Raises:
             ValueError: If joint error codes are not available for this component.
         """
-        state = self._get_state()
+        state = self.get_state()
         if not state.get("error"):
             raise ValueError("Joint error codes are not available for this component.")
         joint_err = np.array(state["error"], dtype=np.uint32)
@@ -489,7 +526,7 @@ class RobotJointComponent(RobotComponent):
         Raises:
             ValueError: If joint positions or velocities are not available.
         """
-        state = self._get_state()
+        state = self.get_state()
         if "pos" not in state or "vel" not in state:
             raise ValueError(
                 "Joint positions or velocities are not available for this component."
@@ -726,6 +763,16 @@ class RobotJointComponent(RobotComponent):
         Raises:
             ValueError: If joint_pos dictionary contains invalid joint names.
         """
+        if wait_time > 0.0:
+            warnings.warn(
+                "wait_time in set_joint_pos() is deprecated and will be removed in "
+                "dexcontrol 0.6.0. Use move_to_joint_pos() instead which relies on "
+                "internal controller to handle motion generation, e.g. motion "
+                "smoothing and gravity compensation.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         if relative:
             joint_pos = self._resolve_relative_joint_cmd(joint_pos)
 
@@ -791,38 +838,6 @@ class RobotJointComponent(RobotComponent):
             NotImplementedError: If child class does not implement this method.
         """
         raise NotImplementedError("Child class must implement _send_position_command")
-
-    def go_to_pose(
-        self,
-        pose_name: str,
-        wait_time: float = 3.0,
-        exit_on_reach: bool = False,
-        exit_on_reach_kwargs: dict[str, float] | None = None,
-    ) -> None:
-        """Move the component to a predefined pose.
-
-        Args:
-            pose_name: Name of the pose to move to.
-            wait_time: Time to wait for the component to reach the pose.
-            exit_on_reach: If True, the function will exit when the joint positions are reached.
-            exit_on_reach_kwargs: Optional parameters for exit when the joint positions are reached.
-
-        Raises:
-            ValueError: If pose pool is not available or if an invalid pose name is provided.
-        """
-        if self._pose_pool is None:
-            raise ValueError("Pose pool not available for this component.")
-        if pose_name not in self._pose_pool:
-            raise ValueError(
-                f"Invalid pose name: {pose_name}. Available poses: {list(self._pose_pool.keys())}"
-            )
-        pose = self._pose_pool[pose_name]
-        self.set_joint_pos(
-            pose,
-            wait_time=wait_time,
-            exit_on_reach=exit_on_reach,
-            exit_on_reach_kwargs=exit_on_reach_kwargs,
-        )
 
     def is_joint_pos_reached(
         self,
@@ -979,3 +994,640 @@ class RobotJointComponent(RobotComponent):
             )
         pose = self._pose_pool[pose_name]
         return self.is_joint_pos_reached(pose, tolerance=tolerance, joint_id=joint_id)
+
+
+class ManagedJointComponent(RobotJointComponent, MotionPluginManaged):
+    """Joint component managed by the motion plugin.
+
+    The motion plugin is the robot's internal motion controller, running on
+    the robot-server (see :class:`MotionPluginManaged`). This client class
+    only publishes targets/trajectories to it and tracks their status; the
+    motion itself (smoothing, gravity compensation, convergence) is computed
+    on the robot.
+
+    Adds the motion/target/ publisher, motion/status/ subscriber, motion-handle
+    bookkeeping, ``move_joint_pos``, ``move_to_joint_pos``, ``go_to_pose``, and
+    the per-component ``default_velocity_scale``. Used by ``Arm``, ``Head``,
+    ``Torso``.
+
+    Components that don't talk to the joint motion plugin (``Hand``,
+    ``DexGripper``, ``ChassisSteer``, ``ChassisDrive``) inherit directly
+    from ``RobotJointComponent`` and don't expose these methods.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        state_sub_topic: str,
+        control_pub_topic: str,
+        control_encoder: Callable[[Any], bytes] | None = None,
+        state_decoder: Callable[[bytes], Any] | None = None,
+        joint_name: list[str] | None = None,
+        joint_pos_limit: Float[np.ndarray, " N 2"] | None = None,
+        joint_vel_limit: Float[np.ndarray, " N"] | None = None,
+        pose_pool: Mapping[str, list[float] | np.ndarray] | None = None,
+    ) -> None:
+        super().__init__(
+            name=name,
+            state_sub_topic=state_sub_topic,
+            control_pub_topic=control_pub_topic,
+            control_encoder=control_encoder,
+            state_decoder=state_decoder,
+            joint_name=joint_name,
+            joint_pos_limit=joint_pos_limit,
+            joint_vel_limit=joint_vel_limit,
+            pose_pool=pose_pool,
+        )
+
+        # Target-control infrastructure (target publisher lazy-initialised on
+        # first use).
+        self._target_publisher: Any | None = None
+        # Trajectory publisher for ``motion/trajectory/`` (lazy-initialised on
+        # first ``move_joint_trajectory`` call).
+        self._trajectory_publisher: Any | None = None
+
+        self._default_velocity_scale: float | None = None
+
+        # motion_id is generated by an iterator from the MotionPluginManaged
+        # helper (random start, monotonic). The lock around _active_handles
+        # also covers next() calls so the cancel-prev → new-id →
+        # register-handle sequence is atomic.
+        self._motion_id_counter: Iterator[int] = self._new_motion_id_counter()
+        self._active_handles: dict[int, MotionHandle] = {}
+        self._motion_status_lock = threading.Lock()
+
+        # Eagerly create the status subscriber so zenoh has time to establish
+        # the subscription before any tracked motion is attempted.
+        self._motion_status_subscriber: Any | None = None
+        self._ensure_status_subscriber()
+
+    @property
+    def default_velocity_scale(self) -> float | None:
+        """Client-side default velocity scale for motion-plugin target calls.
+
+        Returns the per-component default in (0, 1] applied when
+        ``move_joint_pos``/``move_to_joint_pos`` is called without an explicit
+        ``velocity_scale`` argument.
+        ``None`` means no client-side default is set and the motion plugin's
+        own default is used.
+        """
+        return self._default_velocity_scale
+
+    @default_velocity_scale.setter
+    def default_velocity_scale(self, value: float | None) -> None:
+        if value is None:
+            self._default_velocity_scale = None
+            return
+        v = float(value)
+        if not np.isfinite(v):
+            raise ValueError(f"default_velocity_scale must be finite, got {value}")
+        if v <= 0.0 or v > 1.0:
+            raise ValueError(f"default_velocity_scale must be in (0, 1], got {value}")
+        self._default_velocity_scale = v
+
+    def _publish_target(self, msg: Any) -> None:
+        """Publishes a message to the motion-plugin target topic.
+
+        Mirrors :meth:`_publish_control`: publishing to a component implies
+        the caller will want state feedback, so we touch the policy manager
+        to keep the state subscriber from being auto-idled while a motion
+        is being streamed/executed.
+        """
+        self._target_publisher.publish(msg)
+        self._policy_manager.touch()
+
+    def _get_target_topic(self) -> str:
+        """Derive the motion/target/ topic from the control/ topic.
+
+        Uses the relative control_pub_topic (not the fully-qualified
+        publisher.topic) to avoid double namespace prefixing.
+        """
+        return self._control_pub_topic.replace("control/", "motion/target/", 1)
+
+    def _get_status_topic(self) -> str:
+        """Derive the motion/status/ topic from the control/ topic."""
+        return self._control_pub_topic.replace("control/", "motion/status/", 1)
+
+    def _ensure_target_publisher(self) -> None:
+        """Lazily create the target topic publisher on first use.
+
+        Uses JointMotionCodec because the motion/target/ topic carries
+        tracked motion primitives (with motion_id/cancel_motion_id) that
+        JointCmd no longer supports. The streaming control/ topic still
+        uses JointCmdCodec.
+        """
+        if self._target_publisher is not None:
+            return
+        from dexcomm.codecs import JointMotionCodec
+
+        target_topic = self._get_target_topic()
+        self._target_publisher = self._node.create_publisher(
+            topic=target_topic,
+            encoder=JointMotionCodec.encode,
+        )
+
+    def _ensure_trajectory_publisher(self) -> None:
+        """Lazily create the motion/trajectory/ publisher on first use.
+
+        Symmetric with :meth:`_ensure_target_publisher`. Derives the topic
+        from the control_pub_topic so it stays consistent with the rest of
+        the motion-plugin topic family.
+        """
+        if self._trajectory_publisher is not None:
+            return
+        from dexcomm.codecs import JointTrajectoryCodec
+
+        trajectory_topic = self._get_target_topic().replace(
+            "/target/", "/trajectory/", 1
+        )
+        self._trajectory_publisher = self._node.create_publisher(
+            topic=trajectory_topic,
+            encoder=JointTrajectoryCodec.encode,
+        )
+
+    def _ensure_status_subscriber(self) -> None:
+        """Lazily create the status subscriber. Must be called BEFORE publishing
+        a tracked target to avoid race condition."""
+        if self._motion_status_subscriber is not None:
+            return
+        status_topic = self._get_status_topic()
+        self._motion_status_subscriber = self._node.create_subscriber(
+            topic=status_topic,
+            callback=self._on_motion_status,
+            decoder=None,  # Raw bytes; we JSON-decode inside _on_motion_status
+        )
+        logger.debug(f"Created status subscriber for {status_topic}")
+
+    def _on_motion_status(self, raw: bytes) -> None:
+        """Handle incoming motion status events from the plugin.
+
+        The plugin publishes JSON bytes, e.g.:
+        ``{"motion_id": 1, "state": "finished", "message": ""}``.
+        """
+        try:
+            msg = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Received malformed motion status message (not JSON)")
+            return
+        if not isinstance(msg, dict):
+            logger.warning(
+                "Received malformed motion status message (not a JSON object)"
+            )
+            return
+        motion_id = msg.get("motion_id")
+        state = msg.get("state")
+        message = msg.get("message", "")
+        if motion_id is None or state is None:
+            return
+        with self._motion_status_lock:
+            handle = self._active_handles.get(motion_id)
+            if handle is not None:
+                handle._update_state(state, message)
+                if handle.is_done:
+                    self._active_handles.pop(motion_id, None)
+
+    def _publish_cancel(self, motion_id: int) -> None:
+        """Publish a cancel message to the target topic."""
+        self._ensure_target_publisher()
+        self._publish_target({"cancel_motion_id": motion_id})
+
+    def _resolve_scale_arg(
+        self,
+        scale: float | np.ndarray | list[float] | None,
+        n_joints: int,
+    ) -> list[float] | None:
+        """Resolve the ``scale`` argument to a per-joint list (or None).
+
+        Precedence: explicit arg > component default > None (let plugin pick).
+        A scalar is broadcast to all joints; an array/list is converted to a
+        plain ``list[float]`` suitable for the JSON-encoded wire message.
+        """
+        effective = scale if scale is not None else self._default_velocity_scale
+        if effective is None:
+            return None
+        if isinstance(effective, (int, float)):
+            return [float(effective)] * n_joints
+        return [float(v) for v in effective]
+
+    def move_joint_pos(
+        self,
+        pos: np.ndarray | list[float] | dict[str, float],
+        *,
+        relative: bool = False,
+        velocity_scale: float | np.ndarray | list[float] | None = None,
+    ) -> None:
+        """Send a target joint position to the motion plugin.
+
+        The motion plugin is the robot's internal motion controller, running
+        on the robot-server. It handles trajectory generation (smoothing,
+        gravity compensation) and drives the hardware at its configured rate.
+        This client method only publishes the target; it does not track
+        convergence and returns immediately after publishing.
+
+        Args:
+            pos: Target joint positions. Accepts numpy array, list, or dict
+                (keyed by joint name). Clipped to joint limits before sending.
+            relative: If True, the positions are interpreted as offsets from
+                the current joint positions.
+            velocity_scale: Per-joint velocity scale in (0, 1]. Controls how
+                fast the motion executes as a fraction of the hardware velocity
+                ceiling. A scalar is broadcast to all joints. ``None`` falls
+                back to ``self.default_velocity_scale`` if set, otherwise to
+                the motion plugin's default (typically 0.5). Example: 0.25 =
+                quarter of max speed.
+        """
+        self._send_motion_target(
+            pos, scale=velocity_scale, relative=relative, return_handle=False
+        )
+
+    def move_to_joint_pos(
+        self,
+        pos: np.ndarray | list[float] | dict[str, float],
+        *,
+        relative: bool = False,
+        velocity_scale: float | np.ndarray | list[float] | None = None,
+    ) -> MotionHandle:
+        """Send a target joint position to the motion plugin and return a handle.
+
+        The motion plugin is the robot's internal motion controller, running
+        on the robot-server. It handles trajectory generation (smoothing,
+        gravity compensation) and drives the hardware at its configured rate.
+        This client method returns a ``MotionHandle`` that can be used to
+        monitor completion, cancellation, or plugin-side errors.
+
+        Args:
+            pos: Target joint positions. Accepts numpy array, list, or dict
+                (keyed by joint name). Clipped to joint limits before sending.
+            relative: If True, the positions are interpreted as offsets from
+                the current joint positions.
+            velocity_scale: Per-joint velocity scale in (0, 1]. Controls how
+                fast the motion executes as a fraction of the hardware velocity
+                ceiling. A scalar is broadcast to all joints. ``None`` falls
+                back to ``self.default_velocity_scale`` if set, otherwise to
+                the motion plugin's default (typically 0.5). Example: 0.25 =
+                quarter of max speed.
+
+        Returns:
+            MotionHandle for monitoring completion, cancellation, or error.
+        """
+        handle = self._send_motion_target(
+            pos, scale=velocity_scale, relative=relative, return_handle=True
+        )
+        assert handle is not None
+        return handle
+
+    def _send_motion_target(
+        self,
+        pos: np.ndarray | list[float] | dict[str, float],
+        scale: float | np.ndarray | list[float] | None = None,
+        relative: bool = False,
+        return_handle: bool = False,
+    ) -> MotionHandle | None:
+        """Publish a target joint position to the motion plugin.
+
+        Args mirror the public move methods; ``return_handle`` controls whether
+        a client-generated motion_id and MotionHandle are created.
+        """
+        # Resolve relative positions
+        if relative:
+            pos = self._resolve_relative_joint_cmd(pos)
+
+        # Resolve and clip position
+        if isinstance(pos, (list, dict)):
+            pos = self._convert_joint_cmd_to_array(pos)
+        if self._joint_pos_limit is not None:
+            pos = np.clip(pos, self._joint_pos_limit[:, 0], self._joint_pos_limit[:, 1])
+
+        # Resolve velocity scale: explicit arg > component default > plugin default.
+        # scalar → per-joint broadcast.
+        scale_array = self._resolve_scale_arg(scale, len(pos))
+
+        self._ensure_target_publisher()
+
+        msg: dict = {"pos": pos}
+        if scale_array is not None:
+            msg["scale"] = scale_array
+
+        if not return_handle:
+            self._publish_target(msg)
+            return None
+
+        # Handle-returning mode: create the status subscriber before publishing.
+        self._ensure_status_subscriber()
+
+        # Atomically: cancel any in-flight handle-returning motions, allocate a new
+        # motion_id, and register the new handle. Doing all three under a
+        # single lock acquisition prevents concurrent handle-returning calls
+        # from producing colliding motion_ids or out-of-order registration.
+        with self._motion_status_lock:
+            for existing_handle in self._active_handles.values():
+                existing_handle._update_state("cancelled", "superseded by new target")
+            self._active_handles.clear()
+
+            motion_id = next(self._motion_id_counter)
+            handle = MotionHandle(
+                motion_id=motion_id,
+                publish_cancel_fn=self._publish_cancel,
+            )
+            self._active_handles[motion_id] = handle
+
+            # Publish while still holding the lock so a concurrent shutdown
+            # cannot observe the registered motion_id and publish a cancel
+            # before this target has actually reached the wire.
+            msg["motion_id"] = motion_id
+            self._publish_target(msg)
+
+        return handle
+
+    def _validate_trajectory_args(
+        self,
+        positions: np.ndarray | list,
+        time_from_start: np.ndarray | list,
+        velocities: np.ndarray | list | None,
+        accelerations: np.ndarray | list | None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None]:
+        """Structural validation for ``move_joint_trajectory`` inputs.
+
+        Only structural rules are checked here (shape, dtype-finite, length
+        consistency). Semantic rules — scale bounds, time monotonicity,
+        joint-limit bounds — are intentionally deferred to the motion
+        plugin, which clips or rejects per its own validation posture
+        (companion spec ``robot-server-plugin``
+        ``docs/specs/2026-05-17-joint-trajectory-streaming-design.md`` §4.1).
+
+        Returns the coerced numpy arrays so callers don't repeat the
+        ``np.asarray`` work.
+        """
+        if self._joint_name is None:
+            raise ValueError(
+                "Cannot send a joint trajectory: component has no joint_name "
+                "configured (dof is unknown)."
+            )
+        dof = len(self._joint_name)
+
+        try:
+            positions_arr = np.asarray(positions, dtype=float)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"positions cannot be converted to a float array: {e}")
+        if positions_arr.ndim != 2:
+            raise ValueError(
+                f"positions must be a 2-D array with shape (N, dof); "
+                f"got ndim={positions_arr.ndim}, shape={positions_arr.shape}."
+            )
+        n_points, dof_in = positions_arr.shape
+        if dof_in != dof:
+            raise ValueError(
+                f"positions has dof={dof_in}, but component has dof={dof}."
+            )
+        if n_points < 2:
+            raise ValueError(
+                f"positions must have N >= 2 waypoints; got N={n_points}. "
+                "For a single-point command use move_to_joint_pos()."
+            )
+        if not np.isfinite(positions_arr).all():
+            raise ValueError("positions contains non-finite values (NaN or Inf).")
+
+        try:
+            time_arr = np.asarray(time_from_start, dtype=float)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"time_from_start cannot be converted to a float array: {e}"
+            )
+        if time_arr.shape != (n_points,):
+            raise ValueError(
+                f"time_from_start must have shape ({n_points},) to match "
+                f"positions.shape[0]; got shape {time_arr.shape}."
+            )
+        if not np.isfinite(time_arr).all():
+            raise ValueError("time_from_start contains non-finite values (NaN or Inf).")
+
+        velocities_arr: np.ndarray | None = None
+        if velocities is not None:
+            try:
+                velocities_arr = np.asarray(velocities, dtype=float)
+            except (TypeError, ValueError) as e:
+                raise ValueError(
+                    f"velocities cannot be converted to a float array: {e}"
+                )
+            if velocities_arr.shape != positions_arr.shape:
+                raise ValueError(
+                    f"velocities must have the same shape as positions "
+                    f"({positions_arr.shape}); got {velocities_arr.shape}."
+                )
+            if not np.isfinite(velocities_arr).all():
+                raise ValueError("velocities contains non-finite values (NaN or Inf).")
+
+        accelerations_arr: np.ndarray | None = None
+        if accelerations is not None:
+            try:
+                accelerations_arr = np.asarray(accelerations, dtype=float)
+            except (TypeError, ValueError) as e:
+                raise ValueError(
+                    f"accelerations cannot be converted to a float array: {e}"
+                )
+            if accelerations_arr.shape != positions_arr.shape:
+                raise ValueError(
+                    f"accelerations must have the same shape as positions "
+                    f"({positions_arr.shape}); got {accelerations_arr.shape}."
+                )
+            if not np.isfinite(accelerations_arr).all():
+                raise ValueError(
+                    "accelerations contains non-finite values (NaN or Inf)."
+                )
+
+        return positions_arr, time_arr, velocities_arr, accelerations_arr
+
+    def move_joint_trajectory(
+        self,
+        positions: np.ndarray,
+        time_from_start: np.ndarray | list[float],
+        velocities: np.ndarray | None = None,
+        accelerations: np.ndarray | None = None,
+        scale: float | np.ndarray | list[float] | None = None,
+        tracked: bool = False,
+    ) -> MotionHandle | None:
+        """Send a timed joint trajectory to the motion plugin.
+
+        Publishes a JointTrajectory message on motion/trajectory/{component}.
+        The plugin tracks the trajectory using cubic-Hermite interpolation with
+        Ruckig under hard vel/accel/jerk limits; see the motion plugin's
+        docs/smoothing-algorithm.md for execution details.
+
+        Args:
+            positions: (N, dof) waypoint joint positions. N >= 2 required;
+                for single-point use move_to_joint_pos().
+            time_from_start: (N,) waypoint times in seconds. Must be
+                monotonically increasing with t[0] >= 0 and t[-1] > 0.
+            velocities: Optional (N, dof) per-waypoint velocity feedforward
+                in rad/s. If None, the plugin uses centered finite differences
+                between neighboring waypoints.
+            accelerations: Optional (N, dof) per-waypoint acceleration in
+                rad/s^2. Accepted on the wire for forward compatibility;
+                ignored by the v1 plugin (it uses Hermite-derived acc instead).
+            scale: Per-joint motion scale in (0, 1]. Scalar broadcasts to all
+                joints. None lets the plugin pick its default. See the
+                companion plugin spec §4.1.0 for clipping behavior on
+                out-of-range values.
+            tracked: If True, returns a MotionHandle for monitoring completion
+                and cancellation. If False (default), fire-and-forget.
+
+        Returns:
+            MotionHandle if tracked=True, None otherwise.
+
+        Raises:
+            ValueError: structural input errors only (wrong shape, NaN/Inf,
+                length mismatches). Semantic errors (monotone time, scale
+                bounds, joint-limit overrun) are NOT validated here; the
+                plugin handles them per its validation posture (companion
+                spec §4.1).
+        """
+        positions_arr, time_arr, velocities_arr, accelerations_arr = (
+            self._validate_trajectory_args(
+                positions, time_from_start, velocities, accelerations
+            )
+        )
+
+        scale_array = self._resolve_scale_arg(scale, positions_arr.shape[1])
+
+        # Build dexcomm dict: every point carries time_from_start so the
+        # plugin treats this as a timed trajectory.
+        n_points = positions_arr.shape[0]
+        points: list[dict] = []
+        for i in range(n_points):
+            point: dict = {
+                "pos": positions_arr[i].tolist(),
+                "time_from_start": float(time_arr[i]),
+            }
+            if velocities_arr is not None:
+                point["vel"] = velocities_arr[i].tolist()
+            if accelerations_arr is not None:
+                point["accel"] = accelerations_arr[i].tolist()
+            points.append(point)
+
+        msg: dict = {"points": points}
+        if scale_array is not None:
+            msg["scale"] = scale_array
+
+        if not tracked:
+            self._ensure_trajectory_publisher()
+            self._trajectory_publisher.publish(msg)
+            self._policy_manager.touch()
+            return None
+
+        # Tracked mode: ensure status subscriber first to avoid races where
+        # the plugin's first status event arrives before we're subscribed.
+        self._ensure_status_subscriber()
+        self._ensure_trajectory_publisher()
+
+        # Atomically: cancel any in-flight tracked motions, allocate a new
+        # motion_id, and register the new handle. Mirrors move_to_joint_pos
+        # exactly so the two APIs are interchangeable from a tracking
+        # standpoint.
+        with self._motion_status_lock:
+            for existing_handle in self._active_handles.values():
+                existing_handle._update_state("cancelled", "superseded by new target")
+            self._active_handles.clear()
+
+            motion_id = next(self._motion_id_counter)
+            handle = MotionHandle(
+                motion_id=motion_id,
+                publish_cancel_fn=self._publish_cancel,
+            )
+            self._active_handles[motion_id] = handle
+
+            # Publish while still holding the lock so a concurrent shutdown
+            # cannot observe the registered motion_id and publish a cancel
+            # before this trajectory has actually reached the wire.
+            msg["motion_id"] = motion_id
+            self._trajectory_publisher.publish(msg)
+            self._policy_manager.touch()
+        return handle
+
+    def go_to_pose(
+        self,
+        pose_name: str,
+        timeout: float | None = None,
+    ) -> MotionHandle:
+        """Move the component to a predefined pose using the motion plugin.
+
+        Sends the pose as a tracked target to the motion plugin, which handles
+        trajectory smoothing, gravity compensation, and convergence detection.
+        The plugin signals completion when the trajectory converges.
+
+        Args:
+            pose_name: Name of the pose to move to.
+            timeout: Maximum time to wait for the motion to complete, in
+                seconds. None means wait indefinitely until the plugin
+                signals convergence.
+
+        Returns:
+            MotionHandle for the completed motion.
+
+        Raises:
+            ValueError: If pose pool is not available or if an invalid pose
+                name is provided.
+            TimeoutError: If the motion does not complete within timeout.
+        """
+        if self._pose_pool is None:
+            raise ValueError("Pose pool not available for this component.")
+        if pose_name not in self._pose_pool:
+            raise ValueError(
+                f"Invalid pose name: {pose_name}. "
+                f"Available poses: {list(self._pose_pool.keys())}"
+            )
+        pose = self._pose_pool[pose_name]
+        handle = self.move_to_joint_pos(pose)
+        handle.wait(timeout=timeout)
+        return handle
+
+    def shutdown(self) -> None:
+        """Cancel in-flight motions, then clean up motion-plugin resources."""
+        # Cancel any in-flight tracked motions before destroying the target
+        # publisher so the plugin stops its trajectory.
+        try:
+            handles_to_cancel: list[tuple[int, MotionHandle]] = []
+            if hasattr(self, "_active_handles") and self._active_handles:
+                with self._motion_status_lock:
+                    handles_to_cancel = list(self._active_handles.items())
+                    self._active_handles.clear()
+            # Publish cancels OUTSIDE the lock: a status event arriving on the
+            # receiver thread also takes _motion_status_lock, and we must not
+            # block it behind a (potentially blocking) network publish while we
+            # then tear down the very subscriber that feeds it.
+            for motion_id, handle in handles_to_cancel:
+                try:
+                    self._publish_cancel(motion_id)
+                except Exception:
+                    pass  # Best-effort during shutdown
+                handle._update_state("cancelled", "shutdown")
+        except Exception as e:
+            logger.debug(f"Error cancelling tracked motions during shutdown: {e}")
+
+        # Clean up target-control resources.
+        try:
+            if hasattr(self, "_target_publisher") and self._target_publisher:
+                self._target_publisher.shutdown()
+        except Exception as e:
+            logger.warning(
+                f"Error shutting down target publisher for {self.__class__.__name__}: {e}"
+            )
+        try:
+            if hasattr(self, "_trajectory_publisher") and self._trajectory_publisher:
+                self._trajectory_publisher.shutdown()
+        except Exception as e:
+            logger.warning(
+                f"Error shutting down trajectory publisher for {self.__class__.__name__}: {e}"
+            )
+        try:
+            if (
+                hasattr(self, "_motion_status_subscriber")
+                and self._motion_status_subscriber
+            ):
+                self._motion_status_subscriber.shutdown()
+        except Exception as e:
+            logger.warning(
+                f"Error shutting down status subscriber for {self.__class__.__name__}: {e}"
+            )
+
+        # Then run RobotJointComponent.shutdown (publisher + inherited subscriber).
+        super().shutdown()

@@ -31,7 +31,7 @@ from dexcontrol.utils.compat import supported_models
 
 @supported_models("vega_1", "vega_1p")
 def main(
-    speed: float = 0.2,
+    speed: float = 0.1,
     duration: float = 4.0,
 ) -> None:
     """Executes a sequence of chassis movements to demonstrate basic motion control.
@@ -46,7 +46,7 @@ def main(
 
     Args:
         speed: Linear velocity for translations (m/s) or angular velocity for
-            rotations (rad/s). Defaults to 0.2.
+            rotations (rad/s). Defaults to 0.1.
         duration: Time to maintain each movement in seconds. Defaults to 4.0.
     """
     logger.warning("Warning: Be ready to press e-stop if needed!")

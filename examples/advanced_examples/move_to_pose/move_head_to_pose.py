@@ -57,10 +57,12 @@ def main(
                 head.get_predefined_pose(pose),
                 "head",
             )
-            head.set_joint_pos(adjusted_pose, wait_time=6.0)
+            # Head motion is fire-and-forget: send the target and let it go
+            # without waiting for convergence.
+            head.move_joint_pos(adjusted_pose)
         else:
             # Move directly to predefined pose
-            head.go_to_pose(pose, wait_time=6.0)
+            head.go_to_pose(pose, timeout=6.0)
     finally:
         logger.info("Shutting down robot")
         bot.shutdown()

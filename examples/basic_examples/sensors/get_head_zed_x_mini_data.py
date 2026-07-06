@@ -105,9 +105,15 @@ def visualize_camera_data(robot, fps: float = 30.0):
     stream_names = ["left_rgb", "right_rgb", "depth"]
     latency_history: dict[str, list[float]] = {k: [] for k in stream_names}
     LATENCY_WINDOW = 100  # rolling window size
-    frame_count: dict[str, int] = {k: 0 for k in stream_names}
-    fps_start_time = [time.time()]
-    fps_values: dict[str, float] = {k: 0.0 for k in stream_names}
+
+    # Display FPS: measures how fast matplotlib can render (display bottleneck)
+    display_frame_count: dict[str, int] = {k: 0 for k in stream_names}
+    display_fps_start = [time.time()]
+    display_fps: dict[str, float] = {k: 0.0 for k in stream_names}
+
+    # Receive FPS: measures actual frames received from transport (true throughput)
+    last_receive_count: dict[str, int] = {k: 0 for k in stream_names}
+    receive_fps: dict[str, float] = {k: 0.0 for k in stream_names}
 
     def update(frame):
         # Get camera data - simple API call
@@ -154,19 +160,43 @@ def visualize_camera_data(robot, fps: float = 30.0):
                         f"(avg {avg_ms:5.1f} | min {min_ms:5.1f} | max {max_ms:5.1f})"
                     )
 
-                # Track FPS
-                frame_count[key] += 1
-                elapsed = time.time() - fps_start_time[0]
+                # Track display FPS (how fast matplotlib renders)
+                display_frame_count[key] += 1
+
+                # Update FPS every second
+                elapsed = time.time() - display_fps_start[0]
                 if elapsed >= 1.0:
                     for k in stream_names:
-                        fps_values[k] = frame_count[k] / elapsed
-                        frame_count[k] = 0
-                    fps_start_time[0] = time.time()
+                        display_fps[k] = display_frame_count[k] / elapsed
+                        display_frame_count[k] = 0
+
+                    # Compute receive FPS from stream frame counters
+                    head_cam = robot.sensors.head_camera
+                    for k in stream_names:
+                        if k in head_cam._streams and head_cam._streams[k] is not None:
+                            stream = head_cam._streams[k]
+                            # Use _receive_count (works for both Zenoh and RTC)
+                            count = getattr(stream, "_receive_count", 0)
+                            if count == 0:
+                                # Fallback: try subscriber stats (Zenoh only)
+                                sub = getattr(stream, "_subscriber", None)
+                                if sub is not None:
+                                    try:
+                                        stats = sub.get_stats()
+                                        count = stats.get("receive_count", 0)
+                                    except Exception:
+                                        pass
+                            receive_fps[k] = (count - last_receive_count[k]) / elapsed
+                            last_receive_count[k] = count
+
+                    display_fps_start[0] = time.time()
 
                 # Update title with shape + FPS info
                 title = f"{titles[i]}\n{img.shape}"
-                if fps_values[key] > 0:
-                    title += f" | {fps_values[key]:.1f} fps"
+                if receive_fps[key] > 0:
+                    title += f" | recv {receive_fps[key]:.0f}fps"
+                if display_fps[key] > 0:
+                    title += f" | disp {display_fps[key]:.0f}fps"
                 if latency_ms is not None:
                     title += f"\nlatency={latency_ms:.1f}ms"
                 axes[i].set_title(title)
@@ -183,11 +213,12 @@ def visualize_camera_data(robot, fps: float = 30.0):
                 displays[i].set_array(img)
 
         # Print live FPS and latency to terminal
-        fps_parts = [
-            f"{titles[i]:>9s}: {fps_values[k]:5.1f}fps"
-            for i, k in enumerate(stream_names)
-            if fps_values[k] > 0
-        ]
+        fps_parts = []
+        for i, k in enumerate(stream_names):
+            if receive_fps[k] > 0 or display_fps[k] > 0:
+                fps_parts.append(
+                    f"{titles[i]:>9s}: recv={receive_fps[k]:4.0f} disp={display_fps[k]:4.0f}fps"
+                )
         status = " | ".join(fps_parts) if fps_parts else ""
         if latency_parts:
             status += "  " + " | ".join(latency_parts)

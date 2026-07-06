@@ -8,13 +8,12 @@
 # 2. Commercial License
 #    For commercial licensing terms, contact: contact@dexmate.ai
 
-"""Example script to disable arm motors and control brake release.
+"""Example script to control arm brake release.
 
-This script demonstrates how to:
-1. Disable arm motors with optional brake release mode
-2. Control brake release (over-limit drag) for calibration or recovery
+This script demonstrates how to control brake release (over-limit drag)
+for calibration or recovery purposes.
 
-WARNING: Use with caution. When motors are disabled or brake is released,
+WARNING: Use with caution. When brake is released,
 the arm may move unexpectedly if not properly supported.
 """
 
@@ -26,43 +25,6 @@ import tyro
 from dexcontrol.robot import Robot
 
 logger = logging.getLogger(__name__)
-
-
-def disable(
-    side: Literal["left", "right", "both"],
-    joint_idx: list[int],
-    release_brake: bool = False,
-) -> None:
-    """Disable arm motors with brake released or not.
-
-    Args:
-        side: Side of the arm to disable.
-        joint_idx: Joint indices to disable.
-        release_brake: Whether to release the brake (allows manual movement).
-    """
-    with Robot() as bot:
-        if release_brake:
-            # Use release_brake service to allow manual movement
-            if side in ("left", "both"):
-                logger.info(f"Releasing brake for left arm joints: {joint_idx}")
-                result = bot.left_arm.release_brake(enable=True, joints=joint_idx)
-                logger.info(f"Left arm result: {result}")
-            if side in ("right", "both"):
-                logger.info(f"Releasing brake for right arm joints: {joint_idx}")
-                result = bot.right_arm.release_brake(enable=True, joints=joint_idx)
-                logger.info(f"Right arm result: {result}")
-        else:
-            # Use set_modes to disable motors (keeps brake engaged)
-            modes: list[Literal["position", "disable"]] = ["position"] * 7  # type: ignore[assignment]
-            for idx in joint_idx:
-                modes[idx] = "disable"
-
-            if side in ("left", "both"):
-                logger.info(f"Disabling left arm joints: {joint_idx}")
-                bot.left_arm.set_modes(modes)
-            if side in ("right", "both"):
-                logger.info(f"Disabling right arm joints: {joint_idx}")
-                bot.right_arm.set_modes(modes)
 
 
 def brake(
@@ -99,4 +61,4 @@ def brake(
 
 
 if __name__ == "__main__":
-    tyro.extras.subcommand_cli_from_dict({"disable": disable, "brake": brake})
+    tyro.cli(brake)

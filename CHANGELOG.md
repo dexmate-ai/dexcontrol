@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-21
+
+### Added
+
+- **Goal-oriented motion via the motion plugin — `move_joint_pos()` and `move_to_joint_pos()`.** New APIs on `ManagedJointComponent` (arms, head, torso) and `Robot`. The *motion plugin* is the robot's internal motion controller, running on the robot-server: the client publishes a target to `motion/target/{component}` and the plugin handles trajectory smoothing, gravity compensation, and convergence detection on the robot. `move_joint_pos()` is fire-and-forget (returns after publishing); `move_to_joint_pos()` is tracked and returns a `MotionHandle` for plugin-signaled convergence, cancellation, and async waiting. `velocity_scale` is a per-joint scale in `(0, 1]` of the hardware velocity ceiling. These complement `set_joint_pos()` (direct streaming control); they do not replace it.
+- **`MotionHandle` / `MultiMotionHandle`** (`dexcontrol.core.motion_handle`): async handles for tracked motion with `.wait(timeout)`, `.cancel()`, `.state`, `.is_done`, `.message`. `Robot.move_to_joint_pos({...})` returns a `MultiMotionHandle` that waits across components within a shared timeout budget. `wait()` raises `PluginNotAvailableError` if the motion plugin never responds (i.e., not running on the robot-server), distinguishing it from an in-flight motion.
+- **`default_velocity_scale`** on `ManagedJointComponent` and `Robot`. Client-side default in `(0, 1]` applied to `move_joint_pos`/`move_to_joint_pos` when `velocity_scale` is omitted; `None` falls back to the plugin's own default. The Robot-level setter fans out to every managed component.
+- **`ManagedJointComponent` class** (`dexcontrol.core.component.ManagedJointComponent`) and **`MotionPluginManaged` marker mixin** (`dexcontrol.core.component.MotionPluginManaged`). `Arm`, `Head`, and `Torso` inherit `ManagedJointComponent` and expose the motion-plugin APIs (`move_joint_pos`, `move_to_joint_pos`, `move_joint_trajectory`, `go_to_pose`, `default_velocity_scale`). `Hand`, `HandF5D6`, `HandF5D6V2`, `DexGripper`, `ChassisSteer`, and `ChassisDrive` inherit `RobotJointComponent` directly and do **not** expose these APIs. `isinstance(c, MotionPluginManaged)` discovers all motion-plugin clients for Robot-level fan-out. `Chassis` is intentionally **not** managed by the motion plugin — it keeps its local-IK steer/drive control path through `set_velocity()`.
+- **`Torso.set_idle_mode(enabled)` / `get_idle_mode()`.** Toggle the torso's server-side auto-idle behaviour. When disabled, the three torso joints stay actively held at the last commanded position instead of powering down between commands — useful for endurance tests and continuous control loops. Backed by the firmware-side idle-mode service.
+
+### Changed
+
+- **`go_to_pose(pose_name, timeout=None)`** now drives the motion plugin (a tracked `move_to_joint_pos`) and waits for plugin-signaled convergence instead of client-side polling. Signature changed from `(pose_name, wait_time=3.0, exit_on_reach=…)`.
+- **`Robot.set_joint_pos()` is now a thin, non-blocking command primitive.** Signature reduced to `set_joint_pos(joint_pos, relative=False)`. It fans one raw setpoint out to every component and returns immediately. Previously non-PV components (torso, head) could be routed through a host-side smooth-trajectory path when `wait_time > 0`; that routing is gone, so PV and non-PV components are now commanded identically with a single immediate setpoint and no blocking wait. For smooth, controller-managed motion use `move_to_joint_pos()`; for continuous control, call `set_joint_pos()` in a high-frequency loop (e.g. 100–500 Hz).
+- **`Robot.move_joint_pos` / `move_to_joint_pos` validate targets up front.** Passing a non-managed component (e.g., `left_hand`, `chassis`) raises `DexcontrolError` wrapping `ValueError("move_joint_pos() does not support [...]. Supported components: [...].")` at the entry point, instead of a downstream `AttributeError`/`NotImplementedError` from the per-component dispatch loop.
+- **Unified `side` parameter name across examples.** Renamed `arm_side` to `side` in all example scripts so every example uses the same input name. CLI flag for tyro-driven scripts is now `--side` instead of `--arm-side`.
+- **Software E-Stop service wire encoding switched to `DictDataCodec`** (request encoder and response decoder), replacing the prior `SoftwareEstopCodec` request / undecoded response. `EStop.activate()` / `deactivate()` / `toggle()` now read a `{"success", "message"}` response dict. **This is a breaking wire change — the robot-server must run a matching motion/E-Stop service build.**
+
+### Removed (breaking)
+
+- **`Chassis.set_velocity` parameters `sequential_steering`, `steering_wait_time`, `steering_tolerance`** (present through 0.4.x). Sequential steering is always on; the tolerance (0.05 rad) and inter-step wait (1.0 s) are now internal constants. Callers passing these kwargs will get `TypeError`. `set_velocity` now also rejects any other unknown kwargs with `TypeError` instead of silently dropping them.
+- **`Arm.set_mode(mode)` deprecated alias.** Removed in favour of `Arm.set_modes([...])`. Callers of `set_mode` will get `AttributeError`.
+- **`wait_time`, `wait_kwargs`, `exit_on_reach`, and `exit_on_reach_kwargs` removed from `Robot.set_joint_pos()`.** The Robot-level blocking-wait and exit-on-reach behaviour is gone (see Changed). Callers passing any of these will get `TypeError`. Migration: drop the arguments; add an explicit `time.sleep(...)` if you need a settle window, or use `move_to_joint_pos()` for motion that signals its own convergence.
+
+### Migration from 0.5.0rc1
+
+`0.5.0rc1` shipped the motion-plugin client as a single `set_joint_target()` plus `set_joint_trajectory()`. `0.5.0` renames these and splits the tracked/untracked paths into separate methods for clarity. **The wire protocol is unchanged** — only the Python surface differs, and there are **no deprecation aliases** (the old names raise `AttributeError`). If you were on `0.5.0rc1`:
+
+- `set_joint_target(pos)` / `set_joint_target(pos, tracked=False)` → **`move_joint_pos(pos)`** (fire-and-forget, returns `None`).
+- `set_joint_target(pos, tracked=True)` → **`move_to_joint_pos(pos)`** (tracked, returns a `MotionHandle`).
+
 ## [0.4.9] - 2026-03-29
 
 ### Added

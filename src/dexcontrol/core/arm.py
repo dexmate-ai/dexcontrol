@@ -16,6 +16,7 @@ communication and the ArmWrenchSensor class for reading wrench sensor data.
 
 import threading
 import time
+import warnings
 from typing import Any, Literal, cast
 
 import numpy as np
@@ -36,12 +37,17 @@ from jaxtyping import Float
 from loguru import logger
 from rich.console import Console
 
-from dexcontrol.core.component import RobotComponent, RobotJointComponent
+from dexcontrol.core.component import ManagedJointComponent, RobotComponent
+from dexcontrol.core.subscription_policy import (
+    SubscriptionPolicy,
+    SubscriptionPolicyManager,
+)
+from dexcontrol.core.temperature_sensor import TemperatureSensor
 from dexcontrol.exceptions import ServiceUnavailableError
 from dexcontrol.utils.trajectory_utils import generate_linear_trajectory
 
 
-class Arm(RobotJointComponent):
+class Arm(ManagedJointComponent):
     """Robot arm control class.
 
     This class provides methods to control a robot arm by publishing commands and
@@ -99,6 +105,16 @@ class Arm(RobotJointComponent):
                 config.wrench_sub_topic,
                 config.wrist_button_sub_topic,
             )
+        if self.wrench_sensor:
+            self._subcomponents["wrench_sensor"] = self.wrench_sensor
+
+        # Initialize temperature sensor if configured
+        self.temperature_sensor: TemperatureSensor | None = None
+        if config.temperature_sub_topic:
+            self.temperature_sensor = TemperatureSensor(
+                f"{name}_temperature", config.temperature_sub_topic
+            )
+            self._subcomponents["temperature_sensor"] = self.temperature_sensor
 
         # Initialize end effector pass through publisher and subscriber using DexComm
         self.enable_ee_pass_through = config.enable_ee_pass_through
@@ -164,23 +180,6 @@ class Arm(RobotJointComponent):
                 self._joint_vel_limit = np.clip(self._joint_vel_limit, 0, 2.8)
                 logger.warning("Joint velocity limit is clamped to 2.8")
 
-    def set_mode(self, mode: Literal["position", "disable"]) -> None:
-        """Sets the operating mode of the arm.
-
-        .. deprecated::
-            Use set_modes() instead for setting arm modes.
-
-        Args:
-            mode: Operating mode for the arm. Must be either "position" or "disable".
-                "position": Enable position control
-                "disable": Disable control
-
-        Raises:
-            ValueError: If an invalid mode is specified.
-        """
-        logger.warning("arm.set_mode() is deprecated, use set_modes() instead")
-        self.set_modes([mode] * 7)
-
     def set_modes(self, modes: list[Literal["position", "disable"]]) -> None:
         """Sets the operating modes of the arm.
 
@@ -217,6 +216,45 @@ class Arm(RobotJointComponent):
             )
 
         self._mode_querier.call(query_msg)
+
+    def get_modes(self) -> list[str]:
+        """Gets the current operating modes of all 7 arm joints.
+
+        Queries the driver by calling the mode service with an empty payload.
+
+        Returns:
+            List of 7 mode strings, one per joint. Possible values:
+            ``"unspecified"``, ``"disable"``, ``"enable"``, ``"calibration"``,
+            ``"position"``, ``"velocity"``, ``"torque"``, ``"current"``.
+
+        Raises:
+            ServiceUnavailableError: If the mode service is not available.
+            RuntimeError: If the driver returns an error response.
+        """
+        reverse_mode_map = {
+            JointModeEnum.MODE_UNSPECIFIED: "unspecified",
+            JointModeEnum.DISABLE: "disable",
+            JointModeEnum.ENABLE: "enable",
+            JointModeEnum.CALIBRATION: "calibration",
+            JointModeEnum.POSITION: "position",
+            JointModeEnum.VELOCITY: "velocity",
+            JointModeEnum.TORQUE: "torque",
+            JointModeEnum.CURRENT: "current",
+        }
+
+        if not self._mode_querier.wait_for_service(timeout=5.0):
+            raise ServiceUnavailableError("Mode service not available")
+
+        response = self._mode_querier.call()
+        if response is None:
+            raise ServiceUnavailableError("Mode service did not respond")
+
+        if not response.get("success", False):
+            raise RuntimeError(
+                f"Failed to get arm modes: {response.get('message', 'unknown error')}"
+            )
+
+        return [reverse_mode_map.get(m, "unspecified") for m in response["mode"]]
 
     def _send_position_command(self, joint_pos: np.ndarray) -> None:
         """Send joint position command.
@@ -267,6 +305,16 @@ class Arm(RobotJointComponent):
         """
         if wait_kwargs is None:
             wait_kwargs = {}
+
+        if wait_time > 0.0:
+            warnings.warn(
+                "wait_time in set_joint_pos() is deprecated and will be removed in "
+                "dexcontrol 0.6.0. Use move_to_joint_pos() instead which relies on "
+                "internal controller to handle motion generation, e.g. motion "
+                "smoothing and gravity compensation.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         resolved_joint_pos = (
             self._resolve_relative_joint_cmd(joint_pos) if relative else joint_pos
@@ -754,6 +802,26 @@ class ArmWrenchSensor(RobotComponent):
             callback=self._on_button_update,
             decoder=WristButtonStateCodec.decode,
         )
+        # The button subscriber is purely callback-driven — nothing ever polls
+        # it via get_latest_managed(), so under the default AUTO policy the
+        # IdleMonitor would pause it after the idle timeout and button presses
+        # would be silently dropped with no path to auto-resume. Force ALWAYS_ON.
+        self._button_policy_manager = SubscriptionPolicyManager(
+            self._button_subscriber,
+            name=f"{name}_button",
+            default_policy=SubscriptionPolicy.ALWAYS_ON,
+        )
+        self._subcomponents["wrist_button"] = self._button_policy_manager
+
+    def shutdown(self) -> None:
+        """Release the wrench state subscriber and the wrist-button subscriber.
+
+        The base class only shuts down ``_subscriber``; the button subscriber is
+        owned by this class and must be torn down explicitly to avoid leaking it.
+        """
+        if hasattr(self, "_button_subscriber") and self._button_subscriber:
+            self._button_subscriber.shutdown()
+        super().shutdown()
 
     def _on_button_update(self, state: Any) -> None:
         """Handle incoming button updates.
@@ -770,7 +838,7 @@ class ArmWrenchSensor(RobotComponent):
         Returns:
             Array of wrench values [fx, fy, fz, tx, ty, tz].
         """
-        state = self._get_state()
+        state = super().get_state()
         return np.array(state["wrench"], dtype=np.float32)
 
     def get_button_state(self) -> dict[str, bool]:

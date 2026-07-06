@@ -130,6 +130,8 @@ class ZedCameraSensor(BaseCameraSensor):
         else:
             logger.warning(f"ZED camera '{name}' has no active streams")
 
+        self._register_stream_subcomponents()
+
     def get_obs(
         self,
         obs_keys: list[str] | None = None,
@@ -386,6 +388,8 @@ class ZedXOneCameraSensor(BaseCameraSensor):
                 f"ZED X One camera '{name}' initialized with "
                 f"{self._streams['rgb'].transport.value} transport"
             )
+
+        self._register_stream_subcomponents()
 
     def get_obs(self, include_timestamp: bool = False) -> np.ndarray | dict | None:
         """Get the latest RGB observation from the camera.

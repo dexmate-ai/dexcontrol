@@ -1,0 +1,165 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+tmp/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Local development
+.env
+.env.local
+.env.*.local
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Project specific
+.idea/
+*.swp
+*.swo
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Local development
+.env
+.env.local
+.env.*.local
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Project specific
+outputs/
+*.egg-info/
+Log/
+Logs/
+
+# Data
+**/results/*
+*.txt
+*.log
+*.csv
+*.json
+*.pkl
+*.jsonl
+
+# Documentation build files
+docs/_build/
+docs/api/*/
+!docs/api/index.rst
+docs/generated/
+*.doctree
+*.pickle
+
+# Keep manually created documentation files
+!docs/api/core/
+!docs/api/sensors/
+!docs/api/config/
+
+# Sphinx generated files
+.buildinfo
+objects.inv
+searchindex.js
+_sources/
+_static/
+_images/
+
+# GitBook files
+.gitbook/
+_book/
+node_modules/
+*.epub
+*.mobi
+*.pdf
+book.json
+book.js

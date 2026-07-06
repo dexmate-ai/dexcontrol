@@ -18,16 +18,22 @@ pip install dexcontrol[example]
 
 ## ⚠️ Version Compatibility
 
-**Important:** `dexcontrol >= 0.4.0` requires robot firmware `>= 0.4.0`. Using older firmware with this version will not work.
-
-> **Note:** `dexcontrol 0.4.x` depends on `dexcomm >= 0.4.0`, which is **not compatible** with `dexcontrol 0.3.x`. If you need to stay on `dexcontrol 0.3.x`, do not upgrade `dexcomm` to `0.4.0` or above.
-
-**Before upgrading, check your current firmware version:**
-```shell
-dextop firmware info
-```
+**Important:** `dexcontrol >= 0.5.0` requires robot firmware `>= 0.5.0`. Older firmware will not work with this release — update the firmware first, or pin `dexcontrol` to `0.4.x` until you can upgrade.
 
 If your firmware is outdated, please update it before installing the new version to ensure full compatibility. Please contact the Dexmate team if you do not know how to do it.
+
+### Firmware Compatibility Matrix
+
+`dexcontrol` and the robot firmware are released in lockstep on the minor version: a given `dexcontrol 0.X.y` is compatible with firmware `0.X.*`. You can check the firmware version on your robot by running `examples/troubleshooting/display_robot_info.py`.
+
+| `dexcontrol` version | Compatible firmware version |
+| --- | --- |
+| `0.5.x` | `0.5.x` |
+| `0.4.x` | `0.4.x` |
+| `0.3.x` | `0.3.x` |
+| `0.2.x` | `0.2.x` |
+
+If your firmware minor version does not match the `dexcontrol` version you intend to install, the client will print a version warning at startup and some features may not work correctly. Update the firmware first (see [vega-firmware](https://github.com/dexmate-ai/vega-firmware)) or pin `dexcontrol` to a version compatible with your current firmware.
 
 **📋 See [CHANGELOG.md](./CHANGELOG.md) for detailed release notes and version history.**
 

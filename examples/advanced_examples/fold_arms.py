@@ -74,6 +74,9 @@ def main(comp_pitch: bool = False) -> None:
     with Robot() as bot:
         logger.info("Moving both arms to folded position")
 
+        left_arm_target_pose = bot.left_arm.get_predefined_pose(target_pose)
+        right_arm_target_pose = bot.right_arm.get_predefined_pose(target_pose)
+
         if comp_pitch:
             # Compensate for torso pitch and move arms
             if bot.has_component("torso"):
@@ -83,33 +86,23 @@ def main(comp_pitch: bool = False) -> None:
             logger.debug(f"Current torso pitch: {torso_pitch:.4f} rad")
 
             left_arm_target_pose = bot.compensate_torso_pitch(
-                bot.left_arm.get_predefined_pose(target_pose),
+                left_arm_target_pose,
                 "left_arm",
             )
             right_arm_target_pose = bot.compensate_torso_pitch(
-                bot.right_arm.get_predefined_pose(target_pose),
+                right_arm_target_pose,
                 "right_arm",
             )
 
-            # Move both arms simultaneously
-            bot.set_joint_pos(
-                {
-                    "left_arm": left_arm_target_pose,
-                    "right_arm": right_arm_target_pose,
-                },
-                wait_time=5.0,
-                exit_on_reach=True,
-            )
-        else:
-            # Move both arms to folded position without pitch compensation
-            bot.set_joint_pos(
-                {
-                    "left_arm": bot.left_arm.get_predefined_pose(target_pose),
-                    "right_arm": bot.right_arm.get_predefined_pose(target_pose),
-                },
-                wait_time=5.0,
-                exit_on_reach=True,
-            )
+        # Move both arms simultaneously
+        handle = bot.move_to_joint_pos(
+            {
+                "left_arm": left_arm_target_pose,
+                "right_arm": right_arm_target_pose,
+            },
+        )
+        assert handle is not None
+        handle.wait(timeout=5.0)
 
         logger.info("Arms successfully moved to folded position")
 

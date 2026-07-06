@@ -32,7 +32,7 @@ from dexcomm.codecs import (
 from jaxtyping import Float
 from loguru import logger
 
-from dexcontrol.core.component import RobotJointComponent
+from dexcontrol.core.component import RobotComponent, RobotJointComponent
 from dexcontrol.exceptions import ServiceUnavailableError
 
 
@@ -261,12 +261,36 @@ class HandF5D6(Hand):
         return intermediate_pos
 
 
-class HandF5D6V2(Hand):
-    """Specialized hand class for the F5D6 V2 hand model with fingertip force sensing.
+class HandTouchSensor(RobotComponent):
+    """Touch sensor for fingertip force readings."""
 
-    Extends the basic Hand class with fingertip force sensor support using the
-    F5D6HandV2Config touch sensor subscriber.
-    """
+    def __init__(self, name: str, topic: str) -> None:
+        """Initialize the hand touch sensor.
+
+        Args:
+            name: Sensor component name.
+            topic: Zenoh topic for touch sensor data.
+        """
+        super().__init__(
+            name=name,
+            state_sub_topic=topic,
+            state_decoder=FingertipForceCodec.decode,
+        )
+
+    def get_touch_data(self) -> Float[np.ndarray, "5"] | None:
+        """Get the force at the finger tips.
+
+        Returns:
+            Array of 5 force values, or None if no data.
+        """
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
+            return None
+        return msg.data["force"]
+
+
+class HandF5D6V2(Hand):
+    """Specialized hand class for the F5D6 V2 hand model with fingertip force sensing."""
 
     def __init__(self, name: str, robot_info: RobotInfo) -> None:
         """Initialize the F5D6 V2 hand controller.
@@ -278,23 +302,24 @@ class HandF5D6V2(Hand):
         super().__init__(name, robot_info)
         config = robot_info.get_component_config(name)
         config = cast(F5D6HandV2Config, config)
-        self._touch_sensor_subscriber = self._node.create_subscriber(
-            topic=config.touch_sensor_sub_topic,
-            callback=None,
-            decoder=FingertipForceCodec.decode,
-        )
+        self.touch_sensor: HandTouchSensor | None = None
+        if config.touch_sensor_sub_topic:
+            self.touch_sensor = HandTouchSensor(
+                name=f"{name}_touch_sensor",
+                topic=config.touch_sensor_sub_topic,
+            )
+            self._subcomponents["touch_sensor"] = self.touch_sensor
 
     def get_finger_tip_force(self) -> Float[np.ndarray, "5"] | None:
         """Get the force at the finger tips.
 
         Returns:
-            Array of 5 force values at the finger tips, or None if the
-            touch sensor subscriber is not initialized.
+            Array of 5 force values, or None if not initialized or no data.
         """
-        if self._touch_sensor_subscriber is None:
-            logger.warning("Touch sensor subscriber not initialized")
+        if self.touch_sensor is None:
+            logger.warning("Touch sensor not initialized")
             return None
-        return self._touch_sensor_subscriber.get_latest()["force"]
+        return self.touch_sensor.get_touch_data()
 
 
 class DexGripper(RobotJointComponent):
@@ -386,6 +411,25 @@ class DexGripper(RobotJointComponent):
                 "message": "Response time out from gripper mode service",
             }
         return response
+
+    def stop(self) -> None:
+        """Halt the gripper by holding its current position with zero velocity.
+
+        Called by ``Robot.shutdown()`` before ``shutdown()`` so the gripper does
+        not keep executing its last commanded pos/vel target after the process
+        exits (pinch/crush risk if it is holding an object).
+        """
+        current_pos = self.get_joint_pos()
+        zero_vel = np.zeros_like(current_pos, dtype=np.float32)
+        self.set_joint_pos_vel(current_pos, zero_vel, relative=False, wait_time=0.0)
+
+    def shutdown(self) -> None:
+        """Stop the gripper, then release its Zenoh resources."""
+        try:
+            self.stop()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f"Error stopping gripper during shutdown: {e}")
+        super().shutdown()
 
     def set_joint_pos(
         self,
@@ -497,18 +541,6 @@ class DexGripper(RobotJointComponent):
             exit_on_reach_kwargs=exit_on_reach_kwargs,
         )
 
-    def stop(self) -> None:
-        """Stop the gripper by setting target position to current position with zero velocity."""
-        current_pos = self.get_joint_pos()
-        zero_vel = np.zeros(3, dtype=np.float32)
-        self.set_joint_pos_vel(current_pos, zero_vel, relative=False, wait_time=0.0)
-
-    def shutdown(self) -> None:
-        """Clean up Zenoh resources for the gripper component."""
-        self.stop()
-        super().shutdown()
-        # No need to undeclare queriers when using DexComm
-
     def _process_joint_velocities(
         self,
         joint_vel: Float[np.ndarray, "1"]
@@ -549,10 +581,46 @@ class DexGripper(RobotJointComponent):
             joint_vel, clip_value=self._joint_vel_limit
         )
 
-    def open_hand(self) -> None:
-        """Open the hand."""
-        self.set_joint_pos(self._joint_pos_open, wait_time=0.0)
+    def open_hand(
+        self,
+        wait_time: float = 0.0,
+        exit_on_reach: bool = False,
+        exit_on_reach_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Open the gripper to the predefined open position.
 
-    def close_hand(self) -> None:
-        """Close the hand."""
-        self.set_joint_pos(self._joint_pos_close, wait_time=0.0)
+        Args:
+            wait_time: Time to wait after opening the hand. Defaults to 0.0.
+            exit_on_reach: If True, exit when the joint positions are reached.
+                Defaults to False.
+            exit_on_reach_kwargs: Optional parameters for exit when the joint
+                positions are reached. Defaults to None.
+        """
+        self.set_joint_pos(
+            self._joint_pos_open,
+            wait_time=wait_time,
+            exit_on_reach=exit_on_reach,
+            exit_on_reach_kwargs=exit_on_reach_kwargs,
+        )
+
+    def close_hand(
+        self,
+        wait_time: float = 0.0,
+        exit_on_reach: bool = False,
+        exit_on_reach_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Close the gripper to the predefined closed position.
+
+        Args:
+            wait_time: Time to wait after closing the hand. Defaults to 0.0.
+            exit_on_reach: If True, exit when the joint positions are reached.
+                Defaults to False.
+            exit_on_reach_kwargs: Optional parameters for exit when the joint
+                positions are reached. Defaults to None.
+        """
+        self.set_joint_pos(
+            self._joint_pos_close,
+            wait_time=wait_time,
+            exit_on_reach=exit_on_reach,
+            exit_on_reach_kwargs=exit_on_reach_kwargs,
+        )

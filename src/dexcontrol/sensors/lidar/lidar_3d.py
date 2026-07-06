@@ -17,11 +17,16 @@ for efficient point cloud data handling.
 from typing import Any
 
 import numpy as np
-from dexcomm import Node
 from dexcomm.codecs import Lidar3DCodec
 
+from dexcontrol.core.shared_node import get_shared_node
+from dexcontrol.core.subscription_policy import (
+    SubscriptionPolicyManager,
+    SubscriptionPolicyMixin,
+)
 
-class Lidar3DSensor:
+
+class Lidar3DSensor(SubscriptionPolicyMixin):
     """3D LIDAR sensor using DexComm subscriber.
 
     This sensor provides 3D point cloud data using the Lidar3DCodec for
@@ -47,13 +52,17 @@ class Lidar3DSensor:
             configs: Configuration for the 3D LIDAR sensor.
         """
         self._name = name
-        self._node = Node(name=self._name)
+        self._node = get_shared_node()
         # Create the 3D LIDAR subscriber
         self._subscriber = self._node.create_subscriber(
             callback=None,
             decoder=Lidar3DCodec.decode,
             topic=configs.topic,
         )
+        self._policy_manager = SubscriptionPolicyManager(
+            self._subscriber, name=self._name
+        )
+        self._subcomponents: dict[str, object] = {}
 
     def shutdown(self) -> None:
         """Shutdown the 3D LIDAR sensor."""
@@ -98,8 +107,8 @@ class Lidar3DSensor:
                 - is_dense: Whether cloud has invalid points
                 - point_count: Total number of points
         """
-        data = self._subscriber.get_latest()
-        return data
+        msg = self._policy_manager.get_latest_managed()
+        return msg.data if msg is not None else None
 
     def get_points(self) -> np.ndarray | None:
         """Get the latest point cloud as Nx3 array.
@@ -107,9 +116,10 @@ class Lidar3DSensor:
         Returns:
             Array of shape (N, 3) with xyz coordinates if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        if data is None:
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
             return None
+        data = msg.data
 
         # Stack x, y, z into Nx3 array
         x = data.get("x")
@@ -127,9 +137,10 @@ class Lidar3DSensor:
         Returns:
             Array of shape (N, 4) with xyzi if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        if data is None:
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
             return None
+        data = msg.data
 
         # Stack x, y, z, intensity into Nx4 array
         x = data.get("x")
@@ -148,9 +159,10 @@ class Lidar3DSensor:
         Returns:
             Tuple of (x, y, z) arrays if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        if data is None:
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
             return None
+        data = msg.data
 
         x = data.get("x")
         y = data.get("y")
@@ -167,8 +179,8 @@ class Lidar3DSensor:
         Returns:
             Array of intensity values if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data["intensity"] if data else None
+        msg = self._policy_manager.get_latest_managed()
+        return msg.data.get("intensity") if msg else None
 
     def get_ring(self) -> np.ndarray | None:
         """Get the latest ring/channel information.
@@ -176,8 +188,8 @@ class Lidar3DSensor:
         Returns:
             Array of ring IDs if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data["ring"] if data else None
+        msg = self._policy_manager.get_latest_managed()
+        return msg.data.get("ring") if msg else None
 
     def get_point_timestamps(self) -> np.ndarray | None:
         """Get per-point timestamps.
@@ -185,8 +197,8 @@ class Lidar3DSensor:
         Returns:
             Array of timestamps in nanoseconds if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data["point_timestamps_ns"] if data else None
+        msg = self._policy_manager.get_latest_managed()
+        return msg.data.get("point_timestamps_ns") if msg else None
 
     def get_timestamp(self) -> int | None:
         """Get the scan timestamp.
@@ -194,8 +206,8 @@ class Lidar3DSensor:
         Returns:
             Timestamp in nanoseconds if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data["timestamp_ns"] if data else None
+        msg = self._policy_manager.get_latest_managed()
+        return msg.data.get("timestamp_ns") if msg else None
 
     def get_point_count(self) -> int:
         """Get the number of points in the latest scan.
@@ -203,10 +215,10 @@ class Lidar3DSensor:
         Returns:
             Number of points in the scan, 0 if no data available.
         """
-        data = self._subscriber.get_latest()
-        if data is None:
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
             return 0
-        return data.get("point_count", 0)
+        return msg.data.get("point_count", 0)
 
     def get_cloud_shape(self) -> tuple[int, int] | None:
         """Get the organized point cloud shape (height, width).
@@ -214,9 +226,10 @@ class Lidar3DSensor:
         Returns:
             Tuple of (height, width) if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        if data is None:
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
             return None
+        data = msg.data
 
         height = data.get("height")
         width = data.get("width")
@@ -232,10 +245,10 @@ class Lidar3DSensor:
         Returns:
             True if dense, False if contains invalid points or no data.
         """
-        data = self._subscriber.get_latest()
-        if data is None:
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
             return False
-        return data.get("is_dense", False)
+        return msg.data.get("is_dense", False)
 
     @property
     def name(self) -> str:

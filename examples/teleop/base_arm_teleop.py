@@ -153,14 +153,14 @@ class BaseIKController:
         return qpos_dict
 
     def move_delta_cartesian(
-        self, delta_xyz: np.ndarray, delta_rpy: np.ndarray, arm_side: str
+        self, delta_xyz: np.ndarray, delta_rpy: np.ndarray, side: str
     ) -> np.ndarray:
         """Move the specified arm by a delta in Cartesian space.
 
         Args:
             delta_xyz (np.ndarray): Translation delta in x, y, z (meters).
             delta_rpy (np.ndarray): Rotation delta in roll, pitch, yaw (radians).
-            arm_side (str): Which arm to move ("left" or "right").
+            side (str): Which arm to move ("left" or "right").
 
         Returns:
             np.ndarray: Target joint positions for the specified arm.
@@ -186,7 +186,7 @@ class BaseIKController:
         left_ee_pose = ee_pose["L_ee"]
         right_ee_pose = ee_pose["R_ee"]
 
-        if arm_side == "left":
+        if side == "left":
             ee_pose_np = left_ee_pose.np.copy()  # type: ignore
             ee_pose_np[:3, :3] = (
                 pr.matrix_from_euler(delta_rpy, 0, 1, 2, True) @ ee_pose_np[:3, :3]
@@ -196,7 +196,7 @@ class BaseIKController:
                 "L_ee": ee_pose_np,
                 "R_ee": right_ee_pose.np,
             }  # type: ignore
-        elif arm_side == "right":
+        elif side == "right":
             ee_pose_np = right_ee_pose.np.copy()  # type: ignore
             ee_pose_np[:3, 3] += delta_xyz
             ee_pose_np[:3, :3] = (
@@ -207,9 +207,7 @@ class BaseIKController:
                 "R_ee": ee_pose_np,
             }  # type: ignore
         else:
-            raise ValueError(
-                f"Invalid arm side: {arm_side}. Must be 'left' or 'right'."
-            )
+            raise ValueError(f"Invalid arm side: {side}. Must be 'left' or 'right'.")
 
         qpos_dict, is_in_collision, is_within_joint_limits = (
             self.motion_manager.local_ik_solver.solve_ik(target_poses_dict)
@@ -228,7 +226,7 @@ class BaseIKController:
             )
 
         # Extract joint positions for the requested arm
-        arm_prefix = arm_side[0].upper()
+        arm_prefix = side[0].upper()
         arm_joint_indices = [f"{arm_prefix}_arm_j{i + 1}" for i in range(self.arm_dof)]
         return np.array([qpos_dict[joint_name] for joint_name in arm_joint_indices])
 
@@ -237,7 +235,7 @@ class BaseArmTeleopNode(DualSenseTeleopBase):
     """Base teleop node with shared functionality for arm control.
 
     Attributes:
-        arm_side (str): Currently active arm ("left" or "right").
+        side (str): Currently active arm ("left" or "right").
         arms (dict): Dictionary of robot arm interfaces.
         arm_target_qpos (dict): Target joint positions for each arm.
         arm_motion_lock (threading.Lock): Thread lock for synchronizing arm updates.
@@ -258,7 +256,7 @@ class BaseArmTeleopNode(DualSenseTeleopBase):
             device_index (int): Index of the DualSense controller device. Defaults to 0.
         """
         super().__init__(control_hz, button_update_hz, device_index)
-        self.arm_side = "left"
+        self.side = "left"
         self.arm_motion_lock = threading.Lock()
 
         # Real robot interface
@@ -279,7 +277,7 @@ class BaseArmTeleopNode(DualSenseTeleopBase):
 
     def update_controller_lightbar(self):
         """Update the controller lightbar color based on active arm."""
-        if self.arm_side == "left":
+        if self.side == "left":
             # Magenta for left arm
             self.dualsense.lightbar.set_color(255, 0, 255)
         else:
@@ -288,12 +286,10 @@ class BaseArmTeleopNode(DualSenseTeleopBase):
 
     def toggle_arm(self):
         """Toggle between left and right arm control."""
-        self.arm_side = "left" if self.arm_side == "right" else "right"
+        self.side = "left" if self.side == "right" else "right"
         with self.arm_motion_lock:
-            self.arm_target_qpos[self.arm_side] = self.arms[
-                self.arm_side
-            ].get_joint_pos()
-        logger.info(f"Active arm: {self.arm_side}")
+            self.arm_target_qpos[self.side] = self.arms[self.side].get_joint_pos()
+        logger.info(f"Active arm: {self.side}")
         self.update_controller_lightbar()
 
     def arm_control_loop(self):
@@ -305,11 +301,14 @@ class BaseArmTeleopNode(DualSenseTeleopBase):
 
         limiter = RateLimiter(self.control_hz)
         while self.is_running:
-            arm = self.arms[self.arm_side]
             if self.safe_pressed:
                 with self.arm_motion_lock:
-                    target_qpos = self.arm_target_qpos[self.arm_side].copy()
-                arm.set_joint_pos(target_qpos)
+                    # Snapshot `side` under the lock so toggle_arm() can't
+                    # pair this arm with the other arm's target between
+                    # the lookup and the publish.
+                    side = self.side
+                    target_qpos = self.arm_target_qpos[side].copy()
+                self.arms[side].set_joint_pos(target_qpos)
             limiter.sleep()
 
     def update_motion(self) -> None:
@@ -327,10 +326,10 @@ class BaseArmTeleopNode(DualSenseTeleopBase):
         """Stop all ongoing robot motion and reset motion commands."""
         try:
             # Reset smoothers and target positions
-            for arm_side, arm in self.arms.items():
+            for side, arm in self.arms.items():
                 current_pos = arm.get_joint_pos()
                 with self.arm_motion_lock:
-                    self.arm_target_qpos[arm_side] = current_pos
+                    self.arm_target_qpos[side] = current_pos
             logger.info("All arm motion stopped")
         except Exception as e:
             logger.error(f"Error stopping motion: {e}")

@@ -43,7 +43,7 @@ def main(pose: str = "crouch45_high") -> None:
 
     try:
         logger.info(f"Moving torso to {pose} position")
-        bot.torso.go_to_pose(pose, wait_time=6.0)
+        bot.torso.go_to_pose(pose, timeout=6.0)
     finally:
         # Ensure robot is properly shut down
         logger.info("Shutting down robot")

@@ -58,26 +58,28 @@ def main(
         bot.left_arm.is_pose_reached("folded")
         and bot.right_arm.is_pose_reached("folded")
     ):
-        bot.set_joint_pos(
+        handle = bot.move_to_joint_pos(
             {
                 "left_arm": bot.left_arm.get_predefined_pose("folded"),
                 "right_arm": bot.right_arm.get_predefined_pose("folded"),
             },
-            wait_time=10.0,
         )
+        assert handle is not None
+        handle.wait(timeout=10.0)
 
     # Close hands and set initial torso position
     if bot.have_hand("left"):
         bot.left_hand.close_hand()
     if bot.have_hand("right"):
         bot.right_hand.close_hand()
-    bot.torso.go_to_pose("crouch45_medium", wait_time=5.0)
+    bot.torso.go_to_pose("crouch45_medium", timeout=5.0)
 
     # Execute relative joint movement
     RELATIVE_ANGLE: Final[float] = np.deg2rad(25)
     delta_pos = np.zeros(3)
     delta_pos[joint_idx] = RELATIVE_ANGLE
-    bot.torso.set_joint_pos(delta_pos, wait_time=5.0, relative=True)
+    handle = bot.torso.move_to_joint_pos(delta_pos, relative=True)
+    handle.wait(timeout=5.0)
 
     logger.info(
         f"Final torso pitch angle: {np.rad2deg(bot.torso.pitch_angle):.2f} degrees"

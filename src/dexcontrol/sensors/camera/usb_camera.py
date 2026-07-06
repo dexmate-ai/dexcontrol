@@ -123,6 +123,8 @@ class USBCameraSensor(BaseCameraSensor):
                 f"{self._streams['rgb'].transport.value} transport"
             )
 
+        self._register_stream_subcomponents()
+
     def get_obs(self, include_timestamp: bool = False) -> np.ndarray | dict | None:
         """Get the latest RGB observation from the camera.
 

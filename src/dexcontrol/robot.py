@@ -37,9 +37,10 @@ from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
-from dexcontrol.core.component import RobotComponent
+from dexcontrol.core.component import ManagedJointComponent, RobotComponent
 from dexcontrol.core.config import get_component_config_map
 from dexcontrol.core.robot_query_interface import RobotQueryInterface
+from dexcontrol.core.subscription_policy import IdleMonitor, SubscriptionPolicyManager
 from dexcontrol.exceptions import (
     ComponentError,
     ComponentNotAvailableError,
@@ -61,12 +62,27 @@ if TYPE_CHECKING:
     from dexcontrol.core.hand import Hand
     from dexcontrol.core.head import Head
     from dexcontrol.core.misc import Battery, EStop, Heartbeat
+    from dexcontrol.core.motion_handle import MultiMotionHandle
     from dexcontrol.core.torso import Torso
 
 
 # Global registry to track active Robot instances for signal handling
 _active_robots: weakref.WeakSet["Robot"] = weakref.WeakSet()
 _signal_handlers_registered: bool = False
+
+# Maximum per-joint change (radians) allowed in a single set_joint_pos command.
+# set_joint_pos publishes a raw, un-shaped setpoint straight to the component
+# (bypassing the motion plugin's velocity/accel/jerk limiting), so a large jump
+# produces a sudden, fast motion. Commands whose per-joint change exceeds this
+# are rejected; use move_to_joint_pos() for large, controller-managed moves.
+MAX_JOINT_STEP_RAD: Final[float] = 0.5
+
+# Position-controlled joint components subject to MAX_JOINT_STEP_RAD. Hands and
+# chassis are excluded: their joint ranges/units differ and they are not
+# position-step controlled the same way.
+_STEP_GUARDED_COMPONENTS: Final[frozenset[str]] = frozenset(
+    {"left_arm", "right_arm", "head", "torso"}
+)
 
 
 def _register_signal_handlers() -> None:
@@ -333,6 +349,7 @@ class Robot(RobotQueryInterface):
             ("robot components", self._initialize_robot_components),
             ("component activation", self._wait_for_components),
             ("sensors", self._initialize_sensors),
+            ("subscription policies", self._initialize_subscription_policies),
             ("default state", self._set_default_state),
         ]
 
@@ -613,6 +630,42 @@ class Robot(RobotQueryInterface):
 
             raise ValueError(error_msg)
 
+    def _validate_managed_targets(
+        self, joint_pos: dict[str, Any], method_name: str
+    ) -> None:
+        """Validate that every target component is motion-plugin-managed.
+
+        Motion-plugin joint movement is only supported by
+        ``ManagedJointComponent`` subclasses (Arm, Head, Torso). Calling it on
+        Hand, DexGripper, or chassis joints is a programming error. This check
+        surfaces it at the entry point with a clear list of supported
+        components.
+
+        Args:
+            joint_pos: Joint position dictionary to validate.
+            method_name: Public method name to include in error messages.
+
+        Raises:
+            ValueError: If any target component does not support
+                motion-plugin joint movement.
+        """
+        component_map = self.get_controllable_component_map()
+        invalid = sorted(
+            n
+            for n in joint_pos
+            if not isinstance(component_map.get(n), ManagedJointComponent)
+        )
+        if invalid:
+            supported = sorted(
+                n
+                for n, c in component_map.items()
+                if isinstance(c, ManagedJointComponent)
+            )
+            raise ValueError(
+                f"{method_name} does not support {invalid}. "
+                f"Supported components: {supported}."
+            )
+
     def _check_version_compatibility(self) -> None:
         """Check version compatibility between client and server.
 
@@ -626,6 +679,141 @@ class Robot(RobotQueryInterface):
             check_version_compatibility(version_info)
         except Exception as e:
             logger.warning(f"Version compatibility check failed: {e}")
+
+    def _initialize_subscription_policies(self) -> None:
+        """Initialize subscription policies and start the idle monitor.
+
+        Idle timers are reset for all managers before the monitor starts so
+        that subscribers created early during construction are not immediately
+        paused due to elapsed time during the init sequence.
+        """
+        self._idle_monitor = IdleMonitor(check_interval=1.0)
+
+        # Register all component policy managers with the idle monitor
+        for component in self._components:
+            self._register_policy_managers(component)
+
+        # Register sensor policy managers
+        if hasattr(self, "sensors"):
+            for sensor in self.sensors._sensors:
+                self._register_policy_managers(sensor)
+
+        # Reset idle timers so construction time doesn't count as inactivity.
+        # Without this, subscribers created early in init may already exceed
+        # the idle timeout and get paused on the monitor's first sweep.
+        for mgr in self._idle_monitor._managers:
+            mgr.touch()
+
+        self._idle_monitor.start()
+        logger.info("Subscription lifecycle idle monitor started")
+
+    def _register_policy_managers(self, obj: Any) -> None:
+        """Recursively register all policy managers found on obj and its subcomponents."""
+        # Register the object's own policy manager
+        if hasattr(obj, "_policy_manager") and obj._policy_manager is not None:
+            self._idle_monitor.register(obj._policy_manager)
+
+        # If the object itself IS a SubscriptionPolicyManager, register it directly
+        if isinstance(obj, SubscriptionPolicyManager):
+            self._idle_monitor.register(obj)
+
+        # Recurse into subcomponents
+        if hasattr(obj, "_subcomponents"):
+            for sub in obj._subcomponents.values():
+                self._register_policy_managers(sub)
+
+    def set_idle_timeout(self, seconds: float) -> None:
+        """Set global idle timeout for all auto-policy components.
+
+        Args:
+            seconds: Seconds of inactivity before auto-pause.
+        """
+        self._idle_monitor.set_global_idle_timeout(seconds)
+
+    def set_subscription_policy(self, policy: str, recursive: bool = True) -> None:
+        """Set subscription policy for all non-safety components.
+
+        Skips components with always_on default (Battery, EStop).
+
+        Args:
+            policy: New policy string ("always_on", "auto", "manual", "always_off").
+            recursive: If True, propagate to subcomponents.
+        """
+        _SAFETY_COMPONENTS = {"battery", "estop"}
+        component_names = self._robot_info.get_component_list()
+
+        for name in component_names:
+            if name in _SAFETY_COMPONENTS:
+                continue
+            component = getattr(self, name, None)
+            if component is not None and hasattr(component, "set_subscription_policy"):
+                component.set_subscription_policy(policy, recursive=recursive)
+
+        # Apply to sensors
+        if hasattr(self, "sensors"):
+            for sensor in self.sensors._sensors:
+                if hasattr(sensor, "set_subscription_policy"):
+                    sensor.set_subscription_policy(policy, recursive=recursive)
+
+    def get_subscription_status(self) -> dict[str, dict[str, Any]]:
+        """Get subscription status for all components.
+
+        Returns:
+            Dict mapping component names to their policy status including
+            policy, is_paused, and idle_timeout.
+        """
+        status: dict[str, dict[str, Any]] = {}
+        component_names = self._robot_info.get_component_list()
+
+        for name in component_names:
+            component = getattr(self, name, None)
+            if component is None:
+                continue
+            if (
+                hasattr(component, "_policy_manager")
+                and component._policy_manager is not None
+            ):
+                status[name] = {
+                    "policy": component._policy_manager.get_policy().value,
+                    "is_paused": component._policy_manager.is_paused(),
+                    "idle_timeout": component._policy_manager._idle_timeout,
+                }
+            if hasattr(component, "_subcomponents"):
+                for sub_name, sub in component._subcomponents.items():
+                    key = f"{name}.{sub_name}"
+                    if hasattr(sub, "get_policy"):
+                        status[key] = {
+                            "policy": sub.get_policy().value,
+                            "is_paused": sub.is_paused(),
+                            "idle_timeout": sub._idle_timeout,
+                        }
+                    elif (
+                        hasattr(sub, "_policy_manager")
+                        and sub._policy_manager is not None
+                    ):
+                        status[key] = {
+                            "policy": sub._policy_manager.get_policy().value,
+                            "is_paused": sub._policy_manager.is_paused(),
+                            "idle_timeout": sub._policy_manager._idle_timeout,
+                        }
+
+        # Add sensor status
+        if hasattr(self, "sensors"):
+            for sensor in self.sensors._sensors:
+                sensor_name = getattr(
+                    sensor, "_name", getattr(sensor, "name", "unknown")
+                )
+                if (
+                    hasattr(sensor, "_policy_manager")
+                    and sensor._policy_manager is not None
+                ):
+                    status[f"sensor.{sensor_name}"] = {
+                        "policy": sensor._policy_manager.get_policy().value,
+                        "is_paused": sensor._policy_manager.is_paused(),
+                        "idle_timeout": sensor._policy_manager._idle_timeout,
+                    }
+
+        return status
 
     def shutdown(self) -> None:
         """Cleans up and closes all component connections.
@@ -641,34 +829,37 @@ class Robot(RobotQueryInterface):
         logger.info("Shutting down robot components...")
         self._shutdown_called = True
 
+        # Stop idle monitor
+        if hasattr(self, "_idle_monitor"):
+            self._idle_monitor.stop()
+
         try:
             _active_robots.discard(self)
         except Exception:  # pylint: disable=broad-except
             pass
 
-        # First, stop all components that have stop methods to halt ongoing operations
+        # Phase 1: Graceful stop — halt operations on every component that
+        # supports it. An idle-paused *subscriber* only means state reads went
+        # quiet; the component may still be holding torque at its last commanded
+        # target, so it must be stopped regardless of pause state.
         for component in self._components:
             if component is not None:
                 try:
-                    if hasattr(component, "stop"):
-                        method = getattr(component, "stop")
-                        if callable(method):
-                            method()
+                    if hasattr(component, "stop") and callable(component.stop):
+                        component.stop()
                 except Exception as e:  # pylint: disable=broad-except
                     logger.error(
                         f"Error stopping component {component.__class__.__name__}: {e}"
                     )
 
-        # Shutdown sensors first (they may have background threads)
+        # Phase 2: Release resources — shutdown ALL components and sensors.
         try:
             if hasattr(self, "sensors") and self.sensors is not None:
                 self.sensors.shutdown()
-                # Give time for sensor subscribers to undeclare cleanly
                 time.sleep(0.2)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f"Error shutting down sensors: {e}")
 
-        # Shutdown components in reverse order
         for component in reversed(self._components):
             if component is not None:
                 try:
@@ -681,7 +872,12 @@ class Robot(RobotQueryInterface):
         # Brief delay to allow component shutdown to complete
         time.sleep(0.1)
 
-        # Cleanup DexComm shared session
+        # Release this instance's hold on the shared node (only fully shut down
+        # once the last owner releases it) and clean up the DexComm session.
+        try:
+            self._release_shared_node()
+        except Exception as e:
+            logger.debug(f"Shared node cleanup note: {e}")
         try:
             cleanup_session()
         except Exception as e:
@@ -770,80 +966,273 @@ class Robot(RobotQueryInterface):
         except Exception as e:
             raise DexcontrolError(f"Failed to execute trajectory: {e}") from e
 
+    @property
+    def default_velocity_scale(self) -> float | None:
+        """Robot-wide default velocity scale for motion-plugin target calls.
+
+        Setting this fans out to every ``ManagedJointComponent`` (arms, head,
+        torso). Any subsequent ``move_joint_pos``/``move_to_joint_pos`` call
+        without an explicit ``velocity_scale`` uses this value.
+        ``None`` clears the default on all such components, restoring deferral
+        to the motion plugin's own default.
+
+        **Carve-outs:** Cartesian-velocity components like ``Chassis`` are
+        not affected — ``chassis.set_velocity()`` has its own internal
+        clamping (``max_lin_vel`` / ``max_ang_vel``) and ignores this scale.
+
+        **Reads:** return the common value across joint-motion components, or
+        ``None`` if no default is set anywhere. If components disagree (e.g.,
+        a per-component setter was called after the robot-wide fanout), the
+        getter returns ``None`` *and* logs a warning so the inconsistency is
+        visible. Inspect individual ``component.default_velocity_scale`` if
+        you need to distinguish "unset" from "mismatched".
+        """
+        scales = {
+            c.default_velocity_scale
+            for c in self._components
+            if isinstance(c, ManagedJointComponent)
+        }
+        if len(scales) <= 1:
+            # Empty set or single value (including {None}) — return it.
+            return next(iter(scales), None)
+        # Multiple distinct values — components disagree. Surface this so it
+        # doesn't silently look like "nothing is set".
+        logger.warning(
+            "Robot.default_velocity_scale: joint-motion components disagree "
+            f"({scales}); returning None. Set the property again to re-sync, "
+            "or read per-component values directly."
+        )
+        return None
+
+    @default_velocity_scale.setter
+    def default_velocity_scale(self, value: float | None) -> None:
+        for c in self._components:
+            if isinstance(c, ManagedJointComponent):
+                c.default_velocity_scale = value
+
+    def move_joint_pos(
+        self,
+        joint_pos: dict[str, list[float] | np.ndarray],
+        *,
+        relative: bool = False,
+        velocity_scale: float
+        | dict[str, float | list[float] | np.ndarray]
+        | None = None,
+    ) -> None:
+        """Send untracked target positions to the motion plugin.
+
+        This is the robot-level equivalent of
+        ``ManagedJointComponent.move_joint_pos()``. It loops over the provided
+        components, delegates to each component, and returns after publishing
+        the targets.
+
+        Args:
+            joint_pos: Dictionary mapping component names to target joint
+                positions. Values can be lists of floats or numpy arrays.
+            relative: If True, positions are offsets from current joint
+                positions.
+            velocity_scale: Per-joint velocity scale in (0, 1]. Controls how
+                fast the motion executes as a fraction of the hardware velocity
+                ceiling. A scalar is broadcast to all joints of all components.
+                A dict maps component names to per-component scales (scalar or
+                array). None uses the plugin's default (typically 0.5).
+
+        Raises:
+            DexcontrolError: If any component name is invalid or the call
+                fails.
+        """
+        self._send_motion_target(
+            joint_pos,
+            scale=velocity_scale,
+            relative=relative,
+            return_handle=False,
+            method_name="move_joint_pos()",
+        )
+
+    def move_to_joint_pos(
+        self,
+        joint_pos: dict[str, list[float] | np.ndarray],
+        *,
+        relative: bool = False,
+        velocity_scale: float
+        | dict[str, float | list[float] | np.ndarray]
+        | None = None,
+    ) -> "MultiMotionHandle":
+        """Send target positions to the motion plugin and return a handle.
+
+        This is the robot-level equivalent of
+        ``ManagedJointComponent.move_to_joint_pos()``. It loops over the
+        provided components, delegates to each component, and returns a combined
+        handle for tracking completion.
+
+        Args:
+            joint_pos: Dictionary mapping component names to target joint
+                positions. Values can be lists of floats or numpy arrays.
+            relative: If True, positions are offsets from current joint
+                positions.
+            velocity_scale: Per-joint velocity scale in (0, 1]. Controls how
+                fast the motion executes as a fraction of the hardware velocity
+                ceiling. A scalar is broadcast to all joints of all components.
+                A dict maps component names to per-component scales (scalar or
+                array). None uses the plugin's default (typically 0.5).
+
+        Returns:
+            MultiMotionHandle for monitoring completion, cancellation, or error.
+
+        Raises:
+            DexcontrolError: If any component name is invalid or the call
+                fails.
+        """
+        handle = self._send_motion_target(
+            joint_pos,
+            scale=velocity_scale,
+            relative=relative,
+            return_handle=True,
+            method_name="move_to_joint_pos()",
+        )
+        assert handle is not None
+        return handle
+
+    def _send_motion_target(
+        self,
+        joint_pos: dict[str, list[float] | np.ndarray],
+        scale: float | dict[str, float | list[float] | np.ndarray] | None = None,
+        relative: bool = False,
+        return_handle: bool = False,
+        method_name: str = "motion-plugin joint motion",
+    ) -> "MultiMotionHandle | None":
+        """Fan out a motion-plugin target request to managed components."""
+        from dexcontrol.core.motion_handle import MultiMotionHandle
+
+        try:
+            component_map = self.get_controllable_component_map()
+            self.validate_component_names(joint_pos)
+            self._validate_managed_targets(joint_pos, method_name)
+
+            handles: dict[str, Any] = {}
+            for name, pos in joint_pos.items():
+                component = component_map[name]
+                comp_scale = scale
+                if isinstance(scale, dict):
+                    comp_scale = scale.get(name)
+                if return_handle:
+                    handle = component.move_to_joint_pos(
+                        pos, velocity_scale=comp_scale, relative=relative
+                    )
+                    handles[name] = handle
+                else:
+                    component.move_joint_pos(
+                        pos, velocity_scale=comp_scale, relative=relative
+                    )
+
+            if return_handle and handles:
+                return MultiMotionHandle(handles)
+            return None
+
+        except DexcontrolError:
+            raise
+        except Exception as e:
+            raise DexcontrolError(f"Failed to set target positions: {e}") from e
+
     def set_joint_pos(
         self,
         joint_pos: dict[str, list[float] | np.ndarray],
         relative: bool = False,
-        wait_time: float = 0.0,
-        wait_kwargs: dict[str, Any] | None = None,
-        exit_on_reach: bool = False,
-        exit_on_reach_kwargs: dict[str, Any] | None = None,
     ) -> None:
-        """Set the joint positions of the robot.
+        """Send a single joint-position setpoint to each component.
+
+        This is the low-level, non-blocking command primitive: it forwards one
+        position setpoint per component and returns immediately, without any
+        host-side motion shaping or waiting for the motion to complete. Each
+        component applies its own control mode (e.g. joint limits, idle
+        behaviour) internally.
+
+        For smooth, controller-managed motion use `move_to_joint_pos` instead.
+        For continuous control with this method, call it repeatedly in a high-frequency loop (e.g. 100-500 Hz).
 
         Args:
             joint_pos: Dictionary mapping component names to joint positions.
                 Values can be either lists of floats or numpy arrays.
             relative: Whether to set positions relative to current position.
-            wait_time: Time to wait for movement completion in seconds.
-            wait_kwargs: Additional parameters for trajectory generation.
-                control_hz: Control frequency in Hz (default: 100).
-                max_vel: Maximum velocity for trajectory (default: 3.).
-            exit_on_reach: If True, the function will exit when the joint positions are reached.
-            exit_on_reach_kwargs: Optional parameters for exit when the joint positions are reached.
 
         Raises:
-            DexcontrolError: If joint position setting fails (including invalid component names).
+            DexcontrolError: If joint position setting fails (including invalid
+                component names).
         """
-        if wait_kwargs is None:
-            wait_kwargs = {}
-
         try:
-            start_time = time.time()
             component_map = self.get_controllable_component_map()
 
-            # Validate component names
+            # Validate component names before touching any component.
             self.validate_component_names(joint_pos)
 
-            # Separate position-velocity controlled components from others
+            # Safety: reject dangerously large single-command joint moves before
+            # commanding anything, so a bad target aborts the whole call.
+            self._guard_joint_step(joint_pos, relative, component_map)
+
+            # Split into position-velocity (PV) and non-PV components only to
+            # reuse the existing per-group setters; both groups are commanded
+            # immediately with a single setpoint, so the routing is purely a
+            # delegation detail -- there is no behavioural difference between
+            # them here.
             pv_components = [c for c in joint_pos if c in self._pv_components]
             non_pv_components = [c for c in joint_pos if c not in self._pv_components]
 
-            # Set PV components immediately
             self._set_pv_components(pv_components, joint_pos, component_map, relative)
-
-            # Handle non-PV components based on wait_time
-            if wait_time <= 0:
-                self._set_non_pv_components_immediate(
-                    non_pv_components, joint_pos, component_map, relative
-                )
-            else:
-                self._set_non_pv_components_with_trajectory(
-                    non_pv_components,
-                    joint_pos,
-                    component_map,
-                    relative,
-                    wait_time,
-                    wait_kwargs,
-                    exit_on_reach=exit_on_reach,
-                    exit_on_reach_kwargs=exit_on_reach_kwargs,
-                )
-            remaining_time = wait_time - (time.time() - start_time)
-            if remaining_time <= 0:
-                return
-
-            self._wait_for_multi_component_positions(
-                component_map,
-                pv_components,
-                joint_pos,
-                start_time,
-                wait_time,
-                exit_on_reach,
-                exit_on_reach_kwargs,
+            self._set_non_pv_components_immediate(
+                non_pv_components, joint_pos, component_map, relative
             )
 
         except Exception as e:
             raise DexcontrolError(f"Failed to set joint positions: {e}") from e
+
+    def _guard_joint_step(
+        self,
+        joint_pos: dict[str, list[float] | np.ndarray],
+        relative: bool,
+        component_map: dict[str, Any],
+    ) -> None:
+        """Reject dangerously large single-command joint moves.
+
+        ``set_joint_pos`` publishes a raw, un-shaped setpoint straight to the
+        component (bypassing the motion plugin's velocity/accel/jerk limiting),
+        so a large target produces a sudden, fast motion. This guards every
+        position-controlled joint component (arms, head, torso) by rejecting
+        any command whose per-joint change exceeds ``MAX_JOINT_STEP_RAD``.
+        Intended high-frequency streaming sends tiny per-call steps and is
+        unaffected; for large moves use :meth:`move_to_joint_pos` instead.
+
+        Components not in ``_STEP_GUARDED_COMPONENTS`` (e.g. hands, chassis,
+        whose joint ranges and units differ) are skipped.
+
+        Args:
+            joint_pos: The requested joint position dictionary.
+            relative: Whether ``joint_pos`` values are relative to current.
+            component_map: Mapping of component names to component instances.
+
+        Raises:
+            ValueError: If any commanded joint change exceeds the safe limit.
+        """
+        for name, target_cmd in joint_pos.items():
+            if name not in _STEP_GUARDED_COMPONENTS:
+                continue
+
+            target = np.asarray(target_cmd, dtype=float)
+            if relative:
+                # In relative mode the commanded values are the change itself.
+                change = target
+            else:
+                current = np.asarray(component_map[name].get_joint_pos(), dtype=float)
+                change = target - current
+
+            max_change = float(np.abs(change).max())
+            if max_change <= MAX_JOINT_STEP_RAD:
+                continue
+            raise ValueError(
+                f"'{name}' joint change of {max_change:.3f} rad exceeds the safe "
+                f"single-command limit of {MAX_JOINT_STEP_RAD:.3f} rad. "
+                "set_joint_pos sends an un-shaped setpoint; use move_to_joint_pos() "
+                "for large moves, or command smaller incremental steps."
+            )
 
     def _wait_for_multi_component_positions(
         self,

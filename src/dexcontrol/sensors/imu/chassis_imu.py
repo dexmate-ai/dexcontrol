@@ -15,11 +15,16 @@ using DexComm's Raw API.
 """
 
 import numpy as np
-from dexcomm import Node
 from dexcomm.codecs import IMUDataCodec
 
+from dexcontrol.core.shared_node import get_shared_node
+from dexcontrol.core.subscription_policy import (
+    SubscriptionPolicyManager,
+    SubscriptionPolicyMixin,
+)
 
-class ChassisIMUSensor:
+
+class ChassisIMUSensor(SubscriptionPolicyMixin):
     """Chassis IMU sensor using DexComm subscriber.
 
     This sensor provides IMU data from the chassis
@@ -36,12 +41,16 @@ class ChassisIMUSensor:
             configs: Configuration for the chassis IMU sensor.
         """
         self._name = name
-        self._node = Node(name=self._name)
+        self._node = get_shared_node()
         self._subscriber = self._node.create_subscriber(
             topic=configs.topic,
             callback=None,
             decoder=IMUDataCodec.decode,
         )
+        self._policy_manager = SubscriptionPolicyManager(
+            self._subscriber, name=self._name
+        )
+        self._subcomponents: dict[str, object] = {}
 
     def shutdown(self) -> None:
         """Shutdown the chassis IMU sensor."""
@@ -64,7 +73,7 @@ class ChassisIMUSensor:
         Returns:
             True if sensor becomes active, False if timeout is reached.
         """
-        return self._node.wait_for_active(timeout)
+        return self._subscriber.wait_for_message(timeout=timeout) is not None
 
     def get_obs(
         self, obs_keys: list[str] | None = None
@@ -87,7 +96,10 @@ class ChassisIMUSensor:
         if obs_keys is None:
             obs_keys = ["gyro", "acc", "quat"]
 
-        data = self._subscriber.get_latest()
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
+            return None
+        data = msg.data
 
         obs_out = {}
         obs_out["timestamp_ns"] = data["timestamp_ns"]
@@ -109,7 +121,8 @@ class ChassisIMUSensor:
         Returns:
             Linear acceleration [x, y, z] in m/s² if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
+        msg = self._policy_manager.get_latest_managed()
+        data = msg.data if msg is not None else None
         return data.get("acc") if data else None
 
     def get_gyro(self) -> np.ndarray | None:
@@ -118,7 +131,8 @@ class ChassisIMUSensor:
         Returns:
             Angular velocity [x, y, z] in rad/s if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
+        msg = self._policy_manager.get_latest_managed()
+        data = msg.data if msg is not None else None
         return data.get("gyro") if data else None
 
     def get_quat(self) -> np.ndarray | None:
@@ -128,7 +142,8 @@ class ChassisIMUSensor:
             Orientation quaternion [w, x, y, z] if available, None otherwise.
             Note: dexcomm uses [w, x, y, z] quaternion format.
         """
-        data = self._subscriber.get_latest()
+        msg = self._policy_manager.get_latest_managed()
+        data = msg.data if msg is not None else None
         return data.get("quat") if data else None
 
     def get_mag(self) -> np.ndarray | None:
@@ -137,10 +152,10 @@ class ChassisIMUSensor:
         Returns:
             Magnetic field [x, y, z] in µT if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        if not data or not isinstance(data, dict):
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
             return None
-        return data.get("mag", None)
+        return msg.data.get("mag", None)
 
     def has_mag(self) -> bool:
         """Check if the chassis IMU has magnetometer data available.
@@ -148,9 +163,10 @@ class ChassisIMUSensor:
         Returns:
             True if magnetometer data is available, False otherwise.
         """
-        data = self._subscriber.get_latest()
-        if not data or not isinstance(data, dict):
+        msg = self._policy_manager.get_latest_managed()
+        if msg is None:
             return False
+        data = msg.data
         return "mag" in data and data["mag"] is not None
 
     # Backward compatibility aliases

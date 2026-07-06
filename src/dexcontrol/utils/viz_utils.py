@@ -10,38 +10,25 @@
 
 """Utility functions for displaying information in a Rich table format."""
 
+from enum import Enum
+from typing import Any, Literal
+
 from dexcomm.codecs import ConnectionStatusEnum, OperationalStatusEnum
 from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
-from dexcontrol.utils.pb_utils import TYPE_SOFTWARE_VERSION, ComponentStatus
+TYPE_SOFTWARE_VERSION = dict[
+    Literal["hardware_version", "software_version", "main_hash", "compile_time"], Any
+]
 
 
-def show_software_version(version_info: dict[str, TYPE_SOFTWARE_VERSION]):
-    """Create a Rich table for displaying firmware version information.
+class ComponentStatus(Enum):
+    """Enum representing the status of a component."""
 
-    Args:
-        version_info: Dictionary containing version info for each component.
-    """
-    table = Table(title="Firmware Version")
-    table.add_column("Component", style="cyan")
-    table.add_column("Hardware Version")
-    table.add_column("Software Version")
-    table.add_column("Main Hash")
-    table.add_column("Compile Time")
-
-    for component, version in sorted(version_info.items()):
-        table.add_row(
-            component,
-            str(version["hardware_version"]),
-            str(version["software_version"]),
-            str(version["main_hash"]),
-            str(version["compile_time"]),
-        )
-
-    console = Console()
-    console.print(table)
+    NORMAL = 0
+    NA = 1
+    ERROR = 2
 
 
 def show_component_status(status_info: dict[str, dict]):

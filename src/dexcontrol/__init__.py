@@ -40,7 +40,7 @@ from dexcontrol.utils.constants import COMM_CFG_PATH_ENV_VAR
 # Package-level constants
 LIB_PATH: Final[Path] = Path(__file__).resolve().parent
 CFG_PATH: Final[Path] = LIB_PATH / "config"
-MIN_SOC_SOFTWARE_VERSION: int = 419
+MIN_SOC_SOFTWARE_VERSION: int = 1200
 
 logger.configure(
     handlers=[

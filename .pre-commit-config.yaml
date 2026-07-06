@@ -1,0 +1,16 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: src/dexcontrol/proto
+      - id: end-of-file-fixer
+        exclude: src/dexcontrol/proto
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.13.2
+    hooks:
+      # Exclude auto-generated proto files
+      - id: ruff-check
+        args: [--fix, src, examples]
+      - id: ruff-format
+        args: [src, examples]

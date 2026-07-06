@@ -17,11 +17,16 @@ subscriber for scan data.
 from typing import Any
 
 import numpy as np
-from dexcomm import Node
 from dexcomm.codecs import LidarScan2DCodec
 
+from dexcontrol.core.shared_node import get_shared_node
+from dexcontrol.core.subscription_policy import (
+    SubscriptionPolicyManager,
+    SubscriptionPolicyMixin,
+)
 
-class RPLidarSensor:
+
+class RPLidarSensor(SubscriptionPolicyMixin):
     """LIDAR sensor using Zenoh subscriber.
 
     This sensor provides LIDAR scan data using the LidarSubscriber
@@ -39,14 +44,17 @@ class RPLidarSensor:
             configs: Configuration for the LIDAR sensor.
         """
         self._name = name
-        self._node = Node(name=self._name)
+        self._node = get_shared_node()
         # Create the LIDAR subscriber
         self._subscriber = self._node.create_subscriber(
             callback=None,
             decoder=LidarScan2DCodec.decode,
             topic=configs.topic
         )
-
+        self._policy_manager = SubscriptionPolicyManager(
+            self._subscriber, name=self._name
+        )
+        self._subcomponents: dict[str, object] = {}
 
     def shutdown(self) -> None:
         """Shutdown the LIDAR sensor."""
@@ -83,8 +91,8 @@ class RPLidarSensor:
                 - qualities: Array of quality values (0-255) if available, None otherwise
                 - timestamp: Timestamp in nanoseconds (int)
         """
-        data = self._subscriber.get_latest()
-        return data
+        msg = self._policy_manager.get_latest_managed()
+        return msg.data if msg is not None else None
 
     def get_ranges(self) -> np.ndarray | None:
         """Get the latest range measurements.
@@ -92,8 +100,8 @@ class RPLidarSensor:
         Returns:
             Array of range measurements in meters if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data['ranges'] if data else None
+        msg = self._policy_manager.get_latest_managed()
+        return msg.data['ranges'] if msg else None
 
     def get_angles(self) -> np.ndarray | None:
         """Get the latest angle measurements.
@@ -101,8 +109,8 @@ class RPLidarSensor:
         Returns:
             Array of angle measurements in radians if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data['angles'] if data else None
+        msg = self._policy_manager.get_latest_managed()
+        return msg.data['angles'] if msg else None
 
     def get_qualities(self) -> np.ndarray | None:
         """Get the latest quality measurements.
@@ -110,8 +118,8 @@ class RPLidarSensor:
         Returns:
             Array of quality values (0-255) if available, None otherwise.
         """
-        data = self._subscriber.get_latest()
-        return data['intensities'] if data else None
+        msg = self._policy_manager.get_latest_managed()
+        return msg.data['intensities'] if msg else None
 
     def get_point_count(self) -> int:
         """Get the number of points in the latest scan.

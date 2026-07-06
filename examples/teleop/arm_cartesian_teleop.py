@@ -158,10 +158,10 @@ class CartesianTeleopNode(BaseArmTeleopNode):
             target_qpos = self.arm_ik_controller.move_delta_cartesian(
                 delta_arm_motion[:3],  # Translation (x, y, z)
                 delta_arm_motion[3:],  # Rotation (roll, pitch, yaw)
-                self.arm_side,
+                self.side,
             )
             with self.arm_motion_lock:
-                self.arm_target_qpos[self.arm_side] = target_qpos
+                self.arm_target_qpos[self.side] = target_qpos
 
 
 def main(

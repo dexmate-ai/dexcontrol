@@ -104,3 +104,13 @@ class ModelNotSupportedError(ComponentError):
             f"'{method}' is not supported on model '{robot_model}'. "
             f"Supported models: {', '.join(supported_models)}"
         )
+
+
+class PluginNotAvailableError(DexcontrolError):
+    """Raised when a required server-side plugin is not available.
+
+    This indicates that a plugin (e.g., the motion plugin) is not running
+    on the robot-server, or does not support the requested component.
+    """
+
+    pass

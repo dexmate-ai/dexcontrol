@@ -34,8 +34,12 @@ def is_running_remote() -> bool:
     return "DISPLAY" not in os.environ
 
 
-def unfold_robot() -> None:
+def unfold_robot(velocity_scale: float = 0.5) -> None:
     """Unfold the robot from folded position to operational position.
+
+    Args:
+        velocity_scale: Default velocity scale in (0, 1] applied to all
+            joint-motion components.
 
     Raises:
         RuntimeError: If torso or arms fail to reach target positions.
@@ -45,16 +49,18 @@ def unfold_robot() -> None:
     arm_joints: Final[list[int]] = list(range(1, 7))
 
     with Robot() as bot:
+        bot.torso.set_idle_mode(False)
+        bot.default_velocity_scale = velocity_scale
         # First move torso
         if not bot.torso.is_pose_reached(torso_pose):
             logger.info("Moving torso to operational position")
-            bot.set_joint_pos(
+            handle = bot.move_to_joint_pos(
                 {
                     "torso": bot.torso.get_predefined_pose(torso_pose),
                 },
-                wait_time=10.0,
-                exit_on_reach=True,
             )
+            assert handle is not None
+            handle.wait(timeout=10.0)
 
         if not bot.torso.is_pose_reached(torso_pose):
             raise RuntimeError("Torso did not reach the target position! Exiting...")
@@ -69,14 +75,14 @@ def unfold_robot() -> None:
             right_arm_pose = bot.right_arm.get_predefined_pose(arm_pose)
             left_arm_pose = bot.compensate_torso_pitch(left_arm_pose, "left_arm")
             right_arm_pose = bot.compensate_torso_pitch(right_arm_pose, "right_arm")
-            bot.set_joint_pos(
+            handle = bot.move_to_joint_pos(
                 {
                     "left_arm": left_arm_pose,
                     "right_arm": right_arm_pose,
                 },
-                wait_time=6.0,
-                exit_on_reach=True,
             )
+            assert handle is not None
+            handle.wait(timeout=6.0)
 
         # Verify arms reached target position
         left_arm_ready = bot.left_arm.is_pose_reached(arm_pose, joint_id=arm_joints)
@@ -89,15 +95,20 @@ def unfold_robot() -> None:
         head_home_pose = bot.compensate_torso_pitch(
             bot.head.get_predefined_pose("home"), "head"
         )
-        bot.head.set_joint_pos(head_home_pose, wait_time=2.0, exit_on_reach=True)
+        # Head motion is fire-and-forget: send the target and continue without
+        # waiting for the head to converge.
+        bot.head.move_joint_pos(head_home_pose)
+        bot.torso.set_idle_mode(True)
         logger.info("Robot is unfolded!")
 
 
-def fold_robot(safe_motion: bool = True) -> None:
+def fold_robot(safe_motion: bool = True, velocity_scale: float = 0.5) -> None:
     """Fold the robot to its compact storage position.
 
     Args:
         safe_motion: If True, use collision-aware motion planning.
+        velocity_scale: Default velocity scale in (0, 1] applied to all
+            joint-motion components.
 
     Raises:
         RuntimeError: If arms or torso fail to reach folded positions.
@@ -108,6 +119,7 @@ def fold_robot(safe_motion: bool = True) -> None:
     partial_fold_joints: Final[list[int]] = list(range(6))
 
     with Robot() as bot:
+        bot.default_velocity_scale = velocity_scale
         # Close hands first
         if bot.have_hand("left"):
             logger.info("Closing hands before folding arms")
@@ -161,26 +173,27 @@ def fold_robot(safe_motion: bool = True) -> None:
                             if user_input.lower() != "y":
                                 raise RuntimeError("Exiting...") from e
                     else:
-                        bot.set_joint_pos(
+                        handle = bot.move_to_joint_pos(
                             {
                                 "left_arm": bot.left_arm.get_predefined_pose("L_shape"),
                                 "right_arm": bot.right_arm.get_predefined_pose(
                                     "L_shape"
                                 ),
                             },
-                            wait_time=5.0,
                         )
+                        assert handle is not None
+                        handle.wait(timeout=5.0)
 
             # Move arms to folded position
             logger.info("Folding arms")
-            bot.set_joint_pos(
+            handle = bot.move_to_joint_pos(
                 {
                     "left_arm": bot.left_arm.get_predefined_pose(arm_desired_pose),
                     "right_arm": bot.right_arm.get_predefined_pose(arm_desired_pose),
                 },
-                wait_time=6.0,
-                exit_on_reach=True,
             )
+            assert handle is not None
+            handle.wait(timeout=6.0)
 
             # Verify arms reached folded position
             arms_folded = bot.left_arm.is_pose_reached(
@@ -191,18 +204,18 @@ def fold_robot(safe_motion: bool = True) -> None:
 
         # Move torso to folded position
         logger.info("Folding torso")
-        bot.set_joint_pos(
+        handle = bot.move_to_joint_pos(
             {
                 "torso": bot.torso.get_predefined_pose("folded"),
             },
-            wait_time=8.0,
-            exit_on_reach=True,
         )
+        assert handle is not None
+        handle.wait(timeout=8.0)
 
         if not bot.torso.is_pose_reached("folded"):
             raise RuntimeError("Torso did not reach folded position! Exiting...")
 
-        bot.head.go_to_pose("tucked", wait_time=2.0, exit_on_reach=True)
+        bot.head.go_to_pose("tucked", timeout=2.0)
         logger.info("Robot is folded!")
 
 
@@ -210,13 +223,19 @@ def fold_robot(safe_motion: bool = True) -> None:
 def main(
     unfold: bool = False,
     safe_motion: bool = True,
+    velocity_scale: float = 0.5,
 ) -> None:
     """Execute robot folding or unfolding sequence.
 
     Args:
         unfold: If True, unfold the robot; if False, fold the robot.
         safe_motion: If True, use safe motion; if False, use unsafe motion.
+        velocity_scale: Default velocity scale in (0, 1] applied to every
+            joint-motion component for the duration of this run.
     """
+    if not 0.0 < velocity_scale <= 1.0:
+        raise ValueError(f"velocity_scale must be in (0, 1], got {velocity_scale}")
+
     # Safety confirmation
     logger.warning(
         "Warning: Be ready to press e-stop if needed! "
@@ -226,10 +245,13 @@ def main(
     if input("Continue? [y/N]: ").lower() != "y":
         return
 
+    import time
+
+    time.sleep(5)
     if unfold:
-        unfold_robot()
+        unfold_robot(velocity_scale=velocity_scale)
     else:
-        fold_robot(safe_motion=safe_motion)
+        fold_robot(safe_motion=safe_motion, velocity_scale=velocity_scale)
 
 
 if __name__ == "__main__":

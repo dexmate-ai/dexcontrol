@@ -15,7 +15,7 @@ Zenoh communication. It handles steering and wheel velocity control.
 """
 
 import time
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from dexbot_utils import RobotInfo
@@ -25,6 +25,17 @@ from dexcomm.codecs import JointCmdCodec, JointStateCodec
 from jaxtyping import Float
 
 from dexcontrol.core.component import RobotJointComponent
+from dexcontrol.core.subscription_policy import (
+    SubscriptionPolicy,
+    SubscriptionPolicyMixin,
+)
+from dexcontrol.core.temperature_sensor import TemperatureSensor
+
+# Module-private constants for the local-IK control path. They replace the
+# per-call kwargs of the same purpose used pre-0.5.0.
+_STEERING_TOLERANCE: float = 0.05  # rad — sequential-steering trigger
+_STEERING_WAIT_TIME: float = 1.0  # s — pause after pure-steer step
+_MIN_VELOCITY_THRESHOLD: float = 1e-6  # m/s — zero-velocity short-circuit
 
 
 class ChassisSteer(RobotJointComponent):
@@ -123,7 +134,7 @@ class ChassisDrive(RobotJointComponent):
         self._publish_control(control_msg=data)
 
 
-class Chassis:
+class Chassis(SubscriptionPolicyMixin):
     """Robot base control class.
 
     This class provides methods to control a robot's wheeled base by publishing commands
@@ -155,6 +166,31 @@ class Chassis:
         config = cast(Vega1ChassisConfig, config)
         self.chassis_steer = ChassisSteer(f"{name}_steer", robot_info, config)
         self.chassis_drive = ChassisDrive(f"{name}_drive", robot_info, config)
+        # Chassis has no own subscriber — policy delegates to children
+        self._policy_manager = None
+        self._subcomponents: dict[str, Any] = {
+            "steer": self.chassis_steer,
+            "drive": self.chassis_drive,
+        }
+
+        # Initialize temperature sensors for steer and drive
+        self.steer_temperature_sensor: TemperatureSensor | None = None
+        if config.steer_temperature_sub_topic:
+            self.steer_temperature_sensor = TemperatureSensor(
+                f"{name}_steer_temperature", config.steer_temperature_sub_topic
+            )
+            self._subcomponents["steer_temperature_sensor"] = (
+                self.steer_temperature_sensor
+            )
+
+        self.drive_temperature_sensor: TemperatureSensor | None = None
+        if config.drive_temperature_sub_topic:
+            self.drive_temperature_sensor = TemperatureSensor(
+                f"{name}_drive_temperature", config.drive_temperature_sub_topic
+            )
+            self._subcomponents["drive_temperature_sensor"] = (
+                self.drive_temperature_sensor
+            )
 
         self.max_lin_vel = robot_info.get_component_parameter(
             "chassis", "max_linear_vel"
@@ -189,7 +225,23 @@ class Chassis:
         self.max_ang_vel = self.max_lin_vel / self._center_to_wheel_dist
 
         # Constants for steering angle constraints
-        self._min_velocity_threshold = 1e-6
+        self._min_velocity_threshold = _MIN_VELOCITY_THRESHOLD
+
+    def set_subscription_policy(
+        self,
+        policy: SubscriptionPolicy | str,
+        recursive: bool = True,
+    ) -> None:
+        """Set subscription policy for chassis steer and drive components.
+
+        Chassis has no subscriber of its own — always propagates to children.
+
+        Args:
+            policy: New policy (``SubscriptionPolicy`` enum or its string value).
+            recursive: If True, propagate recursively (default True for Chassis).
+        """
+        for sub in self._subcomponents.values():
+            sub.set_subscription_policy(policy, recursive=recursive)
 
     def stop(self) -> None:
         """Stop the base by setting all wheel velocities and steering to zero."""
@@ -202,6 +254,10 @@ class Chassis:
         self.stop()
         self.chassis_steer.shutdown()
         self.chassis_drive.shutdown()
+        if self.steer_temperature_sensor is not None:
+            self.steer_temperature_sensor.shutdown()
+        if self.drive_temperature_sensor is not None:
+            self.drive_temperature_sensor.shutdown()
 
     @property
     def steering_angle(self) -> np.ndarray:
@@ -240,9 +296,6 @@ class Chassis:
         wz: float,
         wait_time: float = 0.0,
         wait_kwargs: dict[str, float] | None = None,
-        sequential_steering: bool = True,
-        steering_wait_time: float = 1.0,
-        steering_tolerance: float = 0.05,
     ) -> None:
         """Set the chassis velocity in the horizontal plane.
 
@@ -266,17 +319,16 @@ class Chassis:
                 Negative = clockwise (right turn)
             wait_time: Time to maintain the command in seconds.
             wait_kwargs: Additional parameters for wait behavior.
-            sequential_steering: If True, first adjust steering angles, then set wheel
-                velocities. If False, set both simultaneously.
-            steering_wait_time: Time to wait for steering adjustment when
-                sequential_steering=True.
-            steering_tolerance: Angular tolerance in radians to consider steering
-                "complete".
 
         Note:
             Steering angles are constrained to [-170°, 170°] ≈ [-2.967, 2.967] rad.
             If the required steering angle exceeds this range, the wheel velocity
             will be reversed and the steering angle adjusted accordingly.
+
+            Sequential steering is always applied: when the current steering error
+            exceeds ``_STEERING_TOLERANCE`` rad, a zero-drive steering command is
+            issued first and held for ``_STEERING_WAIT_TIME`` s before the full
+            motion is sent.
 
         Examples:
             # Move forward at 0.5 m/s
@@ -325,20 +377,12 @@ class Chassis:
         target_steering = np.array([left_steering_angle, right_steering_angle])
         target_wheel_speeds = np.array([left_wheel_speed, right_wheel_speed])
 
-        if sequential_steering:
-            self._apply_sequential_steering(
-                target_steering,
-                target_wheel_speeds,
-                steering_tolerance,
-                steering_wait_time,
-                wait_time,
-                wait_kwargs,
-            )
-        else:
-            # Apply both steering and velocity simultaneously
-            self.set_motion_state(
-                target_steering, target_wheel_speeds, wait_time, wait_kwargs
-            )
+        self._apply_sequential_steering(
+            target_steering,
+            target_wheel_speeds,
+            wait_time,
+            wait_kwargs,
+        )
 
     def move_straight(
         self,
@@ -360,7 +404,6 @@ class Chassis:
             wz=0.0,
             wait_time=wait_time,
             wait_kwargs=wait_kwargs,
-            sequential_steering=True,
         )
 
     def move_sideways(
@@ -383,7 +426,6 @@ class Chassis:
             wz=0.0,
             wait_time=wait_time,
             wait_kwargs=wait_kwargs,
-            sequential_steering=True,
         )
 
     def turn(
@@ -412,7 +454,6 @@ class Chassis:
                 wz=angular_speed,
                 wait_time=wait_time,
                 wait_kwargs=wait_kwargs,
-                sequential_steering=True,
             )
         elif center == "front_wheels_center":
             speed = angular_speed * self._half_wheels_dist
@@ -553,29 +594,29 @@ class Chassis:
         self,
         target_steering: np.ndarray,
         target_wheel_speeds: np.ndarray,
-        steering_tolerance: float,
-        steering_wait_time: float,
         wait_time: float,
         wait_kwargs: dict[str, float],
     ) -> None:
         """Apply steering and velocity commands sequentially if needed.
 
+        Uses the module-private constants ``_STEERING_TOLERANCE`` and
+        ``_STEERING_WAIT_TIME`` to decide whether to issue a pure-steer step
+        before the full motion command.
+
         Args:
             target_steering: Target steering angles for both wheels.
             target_wheel_speeds: Target wheel speeds for both wheels.
-            steering_tolerance: Angular tolerance to consider steering complete.
-            steering_wait_time: Time to wait for steering adjustment.
             wait_time: Time to maintain final command.
             wait_kwargs: Additional parameters for wait behavior.
         """
         current_steering = self.steering_angle
         steering_error = np.linalg.norm(current_steering - target_steering)
-        if steering_error > steering_tolerance:
+        if steering_error > _STEERING_TOLERANCE:
             # Step 1: Adjust steering angles with zero wheel velocity
             self.set_motion_state(
                 target_steering,
                 np.zeros(2),
-                wait_time=steering_wait_time,
+                wait_time=_STEERING_WAIT_TIME,
                 wait_kwargs=wait_kwargs,
             )
 
@@ -633,16 +674,13 @@ class Chassis:
             steering_angle: Target steering angles.
             wheel_velocity: Target wheel velocities.
         """
-        if isinstance(steering_angle, float):
-            steering_angle = np.array([steering_angle, steering_angle])
-            self.chassis_steer._send_position_command(steering_angle)
-        elif isinstance(steering_angle, np.ndarray):
-            self.chassis_steer._send_position_command(steering_angle)
-
-        if isinstance(wheel_velocity, float):
+        if isinstance(wheel_velocity, (int, float)):
             wheel_velocity = np.array([wheel_velocity, wheel_velocity])
-        elif isinstance(wheel_velocity, np.ndarray):
-            self.chassis_drive._send_velocity_command(wheel_velocity)
+        if isinstance(steering_angle, (int, float)):
+            steering_angle = np.array([steering_angle, steering_angle])
+
+        self.chassis_steer._send_position_command(steering_angle)
+        self.chassis_drive._send_velocity_command(wheel_velocity)
 
     def _compute_wheel_control(
         self, wheel_velocity: np.ndarray, current_angle: float

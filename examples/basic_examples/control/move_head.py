@@ -26,7 +26,7 @@ def move_joint_sequence(
     head: Head,
     joint_idx: int,
     step_size: float,
-    wait_time: float = 1.0,
+    motion_timeout: float = 2.0,
 ) -> None:
     """Executes movement sequence for a single joint.
 
@@ -36,7 +36,8 @@ def move_joint_sequence(
         head: Robot head instance to control
         joint_idx: Index of joint to move
         step_size: Size of joint movement in radians
-        wait_time: Time to wait between movements in seconds
+        motion_timeout: Maximum seconds to wait for each tracked motion to
+            report completion.
     """
     joint_names = ["yaw", "pitch", "roll"]
     # Create the three positions (all initialized to zeros)
@@ -50,25 +51,30 @@ def move_joint_sequence(
 
     # Move positive
     logger.info(f"Moving head {joint_names[joint_idx]} positive ({step_size} rad)")
-    head.set_joint_pos(positive_pos, wait_time=wait_time)
+    handle = head.move_to_joint_pos(positive_pos)
+    handle.wait(timeout=motion_timeout)
 
     # Move negative
     logger.info(f"Moving head {joint_names[joint_idx]} negative ({-step_size} rad)")
-    head.set_joint_pos(negative_pos, wait_time=wait_time)
+    handle = head.move_to_joint_pos(negative_pos)
+    handle.wait(timeout=motion_timeout)
 
     # Return to zero
     logger.info(f"Moving head {joint_names[joint_idx]} to zero")
-    head.set_joint_pos(zero_pos, wait_time=wait_time)
+    handle = head.move_to_joint_pos(zero_pos)
+    handle.wait(timeout=motion_timeout)
 
 
 def main(
     step_size: float = 0.5,
+    motion_timeout: float = 2.0,
 ) -> None:
     """Move robot head to zero position and then move each joint individually.
 
     Args:
         step_size: Size of the joint movement in radians
-        wait_time: Time to wait between movements in seconds
+        motion_timeout: Maximum seconds to wait for each tracked motion to
+            report completion.
     """
     # Initialize robot
     bot = Robot()
@@ -78,7 +84,8 @@ def main(
         # Initial head position (slightly tilted down)
         initial_pos = np.array([-np.pi / 6, 0.0, 0.0])
         logger.info(f"Moving head to initial position: {np.rad2deg(initial_pos)} deg")
-        head.set_joint_pos(initial_pos, wait_time=1.0)
+        handle = head.move_to_joint_pos(initial_pos)
+        handle.wait(timeout=motion_timeout)
 
         # Define joint names and movement sequence
         joint_names = ["yaw (left/right)", "pitch (up/down)", "roll"]
@@ -88,7 +95,7 @@ def main(
             logger.info(
                 f"Starting movement sequence for joint {joint_idx} ({joint_names[joint_idx]})"
             )
-            move_joint_sequence(head, joint_idx, step_size)
+            move_joint_sequence(head, joint_idx, step_size, motion_timeout)
 
         logger.info("Movement sequence completed")
 

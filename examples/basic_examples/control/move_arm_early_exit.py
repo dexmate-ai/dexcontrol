@@ -51,7 +51,7 @@ def main() -> None:
     # Movement 1: Standard pose movement (waits full time)
     logger.info("Starting standard pose movement to 'L_shape'...")
     start_time = time.time()
-    robot.left_arm.go_to_pose("L_shape", wait_time=wait_time)
+    robot.left_arm.go_to_pose("L_shape", timeout=wait_time)
     actual_time = time.time() - start_time
 
     logger.info("Standard movement completed:")
@@ -63,9 +63,7 @@ def main() -> None:
     start_time = time.time()
     robot.left_arm.go_to_pose(
         "folded",
-        wait_time=wait_time,
-        exit_on_reach=True,
-        exit_on_reach_kwargs={"tolerance": tolerance},
+        timeout=wait_time,
     )
     actual_time = time.time() - start_time
 
