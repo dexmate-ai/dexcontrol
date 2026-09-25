@@ -1,40 +1,20 @@
-name: tagged release
-
+# Copyright (C) 2026 Dexmate Inc.
+#
+# This software is dual-licensed:
+#
+# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
+#    See LICENSE-AGPL for details
+#
+# 2. Commercial License
+#    For commercial licensing terms, contact: contact@dexmate.ai
+# Replace the old public publisher with this inactive migration placeholder.
+name: Packages are published by private CI
 on:
-  push:
-    tags:
-      - "v*"
-
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  build-and-publish:
-    name: Build and publish Python distribution to PyPI
-    runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
-      contents: read
-
+  information:
+    runs-on: ubuntu-24.04
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: Install build dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install build twine
-
-    - name: Build package
-      run: python -m build -w
-
-    - name: Verify package
-      run: twine check dist/*
-
-    - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        print-hash: true
+      - run: echo 'Packages are built, inspected and published by the private release pipeline.'
