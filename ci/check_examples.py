@@ -42,6 +42,8 @@ def check(root, binaries):
             for option, value in (("samples", "1"), ("period", "0.01"), ("wait-time", "0"), ("settle", "0"), ("delta", "0.01")):
                 if option in options:
                     arguments += ["--" + option, value]
+            if "no-display" in options:
+                arguments += ["--no-display"]
             if "duration" in options:
                 arguments += ["--duration", "0.05"]
             if binary.startswith("benchmark-arm-"):
@@ -57,7 +59,7 @@ def check(root, binaries):
             if binary == "advanced-replay-trajectory":
                 arguments += [str(trajectory)]
             if binary == "sensor-monitor-lidar-imu":
-                arguments += ["--sensor", "head_imu"]
+                arguments += ["--sensor", "head_camera"]
             if binary == "sensor-monitor-chassis-cameras":
                 arguments += ["--camera", "head_camera"]
             result = subprocess.run([str(path), *arguments], input="w\ns\nq\n", env=environment, cwd=root,

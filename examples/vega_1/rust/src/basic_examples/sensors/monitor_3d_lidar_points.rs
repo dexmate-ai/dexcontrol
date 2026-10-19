@@ -10,7 +10,7 @@
 
 //! Monitor point clouds from one 3D LiDAR.
 //!
-//! Enable the front 3D LiDAR, wait up to 10 s for activity, and poll 100 times at 0.1 s intervals. --position back selects the rear LiDAR; no cloud file is saved.
+//! Enable the front 3D LiDAR, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. --position back selects the rear LiDAR; no cloud file is saved.
 //!
 //! Prints numeric summaries/frame metadata; does not open a viewer.
 //!
@@ -22,7 +22,7 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result {
     let args = Args::parse(
-        "Monitor point clouds from one 3D LiDAR. Enable the front 3D LiDAR, wait up to 10 s for activity, and poll 100 times at 0.1 s intervals. --position back selects the rear LiDAR; no cloud file is saved. Prints numeric summaries/frame metadata; does not open a viewer. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
+        "Monitor point clouds from one 3D LiDAR. Enable the front 3D LiDAR, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. --position back selects the rear LiDAR; no cloud file is saved. Prints numeric summaries/frame metadata; does not open a viewer. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
         &["period", "position", "samples"],
     );
     let position = args.text("position", "front");
@@ -32,7 +32,11 @@ async fn main() -> Result {
         ));
     }
     let sensor = format!("lidar_3d_{position}");
-    let samples = args.integer("samples", 100)?;
+    let samples = if args.has("samples") {
+        Some(args.integer("samples", 0)?)
+    } else {
+        None
+    };
     let period = args.duration("period", 0.1)?;
     let robot = args.connect(std::slice::from_ref(&sensor)).await?;
     dexcontrol_examples::run_robot(&robot, async {
@@ -41,7 +45,8 @@ async fn main() -> Result {
                 "{sensor} did not become active"
             )));
         }
-        for index in 0..samples {
+        let mut index = 0;
+        while samples.is_none_or(|limit| index < limit) {
             let cloud = robot.lidar_3d(&sensor, None)?;
             let range = cloud
                 .z()?
@@ -58,7 +63,10 @@ async fn main() -> Result {
             } else {
                 println!("sample={} points=0", index + 1);
             }
-            pause(period).await;
+            index += 1;
+            if samples.is_none_or(|limit| index < limit) {
+                pause(period).await;
+            }
         }
         Ok(())
     })

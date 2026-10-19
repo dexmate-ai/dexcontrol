@@ -22,7 +22,8 @@ It is not evidence of physical execution or convergence. See `--help` for overri
 - Managed joint motion does not imply collision avoidance. A caller wait timeout does not cancel the server operation; cleanup attempts to stop it. Group publication is best-effort, not synchronized execution.
 - Many small motion examples use `wait()`, which can return a cancelled or superseded terminal status. Returning from that wait alone does not prove the target was reached; `wait_success()` requires successful completion.
 - Sensor loops poll cached observations. A sample/iteration count does not promise that many unique fresh frames; unavailable frames may produce no output. Rust sampling loops generally also pause after the final read, while Python/C++ scalar loops usually pause only between reads.
-- Python LiDAR, camera and current monitors open/connect a Rerun viewer unless `--no-display`; missing rerun-sdk falls back to printing. C++/Rust print summaries and do not open a viewer.
+- Python LiDAR, camera and current monitors open/connect a Rerun viewer unless `--no-display`; missing rerun-sdk falls back to printing. C++/Rust camera monitors open an owned Rerun viewer; --no-display prints frame metadata. Other native sensor monitors print summaries.
+- All monitor_* examples run continuously by default until Ctrl+C; --samples N sets a finite poll limit. Native camera monitors also stop when their viewer window is closed.
 - Only tracking benchmarks write measurement files by default. Polling a sensor does not save its data. Interactive scripts continue until their documented quit/interrupt condition.
 
 ## Shared tasks
@@ -161,13 +162,15 @@ Connection: **control**.
 
 ### `advanced_examples/move_to_pose/pose_arm`
 
-Move one arm to a named pose using its model-declared reference frame.
+Move arms to a named pose using their model-declared reference frames.
 
 Move the right arm to L_shape with model-defined torso-pitch compensation; wait up to 10 s. folded and folded_closed_hand stay joint-relative and receive no compensation. zero stores seven zeros relative to an upright torso and compensates only torso tilt from upright; --passthrough returns literal zeros. --passthrough uses raw stored values while retaining target validation. No collision checking is performed.
 
 Connection: **control**.
 
 [Python](vega_1/python/advanced_examples/move_to_pose/pose_arm.py) · [C++](vega_1/cpp/advanced_examples/move_to_pose/pose_arm.cpp) · [Rust](vega_1/rust/src/advanced_examples/move_to_pose/pose_arm.rs) (`advanced-pose-arm`)
+
+- **python**: --side both resolves both arm targets before starting a group motion and waits up to --timeout seconds for the group. Starts are not synchronized.
 
 ### `advanced_examples/move_to_pose/pose_head`
 
@@ -315,7 +318,7 @@ Connection: **control**.
 
 Monitor point clouds from one 3D LiDAR.
 
-Enable the front 3D LiDAR, wait up to 10 s for activity, and poll 100 times at 0.1 s intervals. --position back selects the rear LiDAR; no cloud file is saved.
+Enable the front 3D LiDAR, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. --position back selects the rear LiDAR; no cloud file is saved.
 
 Connection: **control**.
 
@@ -329,7 +332,7 @@ Connection: **control**.
 
 Monitor the IMU associated with a 3D LiDAR.
 
-Enable lidar_3d_front_imu, wait up to 10 s for activity, and print 100 observations at 0.05 s intervals. --sensor selects another declared IMU.
+Enable lidar_3d_front, wait up to 10 s for its IMU stream, and print observations continuously at 0.05 s intervals until Ctrl+C. --samples N limits the number of polls. --sensor selects another sensor with an IMU capability.
 
 Connection: **control**.
 
@@ -359,15 +362,15 @@ Connection: **control**.
 
 Monitor frames from configured chassis cameras.
 
-Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; poll 200 times at 30 Hz, then unsubscribe. No image files are saved.
+Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; monitor at 30 Hz until Ctrl+C by default. --samples N limits the number of polls. Unsubscribe on exit. No image files are saved.
 
 Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/monitor_chassis_cameras.py) · [C++](vega_1/cpp/basic_examples/sensors/monitor_chassis_cameras.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/monitor_chassis_cameras.rs) (`sensor-monitor-chassis-cameras`)
 
 - **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
-- **cpp**: Prints numeric summaries/frame metadata; does not open a viewer.
-- **rust**: Prints numeric summaries/frame metadata; does not open a viewer.
+- **cpp**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
+- **rust**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 
 ### `basic_examples/sensors/read_arm_force_torque`
 
@@ -393,35 +396,35 @@ Connection: **control**.
 
 Monitor frames from the configured head camera.
 
-Enable head_camera, subscribe to all advertised streams unless selected with --stream, and poll 200 times at 30 Hz before unsubscribing. The sensor name is configurable; no particular camera brand is required and no image files are saved.
+Enable head_camera, subscribe to all advertised streams unless selected with --stream, and monitor at 30 Hz until Ctrl+C by default, then unsubscribe. --samples N limits the number of polls. The sensor name is configurable; no particular camera brand is required and no image files are saved.
 
 Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/monitor_head_camera.py) · [C++](vega_1/cpp/basic_examples/sensors/monitor_head_camera.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/monitor_head_camera.rs) (`sensor-monitor-head-camera`)
 
 - **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
-- **cpp**: Prints numeric summaries/frame metadata; does not open a viewer.
-- **rust**: Prints numeric summaries/frame metadata; does not open a viewer.
+- **cpp**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
+- **rust**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 
 ### `basic_examples/sensors/read_imu_states`
 
 Read and print observations from configured IMUs.
 
-Read head_imu and chassis_imu once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.
+Read IMU streams from head_camera and chassis_imu (when declared) once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.
 
 Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/read_imu_states.py) · [C++](vega_1/cpp/basic_examples/sensors/read_imu_states.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/read_imu_states.rs) (`sensor-read-imu-states`)
 
-- **python**: Requested IMUs are passed to Robot before filtering; an undeclared sensor can fail connection.
+- **python**: Filters undeclared IMU names before connecting.
 - **cpp**: Filters undeclared IMU names before connecting.
 - **rust**: Filters undeclared IMU names before connecting.
 
 ### `basic_examples/sensors/monitor_2d_lidar_scans`
 
-Monitor a bounded sequence of 2D LiDAR scans.
+Monitor live 2D LiDAR scans.
 
-Enable lidar_2d_front, wait up to 10 s for activity, and poll 200 times at 0.1 s intervals. Display XY points or range summaries; no scan file is saved.
+Enable lidar_2d_front, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. Display XY points or range summaries; no scan file is saved.
 
 Connection: **control**.
 
@@ -455,29 +458,19 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/read_component_temperatures.py) · [C++](vega_1/cpp/basic_examples/sensors/read_component_temperatures.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/read_component_temperatures.rs) (`sensor-read-component-temperatures`)
 
-### `basic_examples/sensors/read_ultrasonic_ranges`
-
-Read and print ultrasonic ranges.
-
-Enable ultrasonic, wait up to 5 s for activity, and print one observation by default. Optional repeated reads use a 0.1 s interval.
-
-Connection: **control**.
-
-[Python](vega_1/python/basic_examples/sensors/read_ultrasonic_ranges.py) · [C++](vega_1/cpp/basic_examples/sensors/read_ultrasonic_ranges.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/read_ultrasonic_ranges.rs) (`sensor-read-ultrasonic-ranges`)
-
 ### `basic_examples/sensors/monitor_wrist_cameras`
 
 Monitor frames from the configured wrist cameras.
 
-Enable left_wrist_camera and right_wrist_camera unless --sensor supplies names. Subscribe to selected/all advertised streams, poll 200 times at 30 Hz, then unsubscribe. No particular camera brand is required and no image files are saved.
+Enable left_wrist_camera and right_wrist_camera unless --sensor supplies names. Subscribe to selected/all advertised streams, monitor at 30 Hz until Ctrl+C by default, then unsubscribe. --samples N limits the number of polls. No particular camera brand is required and no image files are saved.
 
 Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/monitor_wrist_cameras.py) · [C++](vega_1/cpp/basic_examples/sensors/monitor_wrist_cameras.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/monitor_wrist_cameras.rs) (`sensor-monitor-wrist-cameras`)
 
 - **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
-- **cpp**: Prints numeric summaries/frame metadata; does not open a viewer.
-- **rust**: Prints numeric summaries/frame metadata; does not open a viewer.
+- **cpp**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
+- **rust**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 
 ### `benchmark/arm_tracking/benchmark_arm_sine`
 

@@ -100,12 +100,12 @@ Filenames use short action-and-subject names, generally two to four words. Exact
 
 Robot connections may enable compatible arm modes during startup and request a stop during shutdown, including programs whose main task only reads state. Only the two DiagnosticClient programs are command-free.
 
-The checked inventory contains **46 tasks**: 44 Robot tasks
+The checked inventory contains **45 tasks**: 43 Robot tasks
 and two production-only diagnostics. Every task has Python, C++ and Rust versions;
 the Python examples are the reference. Each table row links implementations
 of the same task; it does not assert identical flags, outputs or algorithms.
 
-All 46 Robot tasks accept `--simulated --profile vega_1` and `--config FILE`.
+All 43 Robot tasks accept `--simulated --profile vega_1` and `--config FILE`.
 Simulation enforces E-stop for joint commands and motion cancellation, checks state arrival, and rejects unsupported publish endpoints. It does not model hardware dynamics, camera streams or every firmware
 service. Some examples therefore report unavailable data/services in simulation.
 `display_robot_info` and `measure_robot_clock_offset` reject simulation (Python's
@@ -137,7 +137,7 @@ seven-joint step waveform and CSV measurements through all three languages.
 
 Known differences:
 
-- Python sensors can use Rerun; native examples print readings/statistics.
+- Python camera monitors open Rerun by default (`--no-display` prints metadata). C++ and Rust do the same when native visualization support is built; packaged control-SDK examples use `--no-display`. The reusable native viewer supports live and one-time images without a robot. See [visualization behavior](BEHAVIOR.md#connections-waiting-and-output). Other native sensor examples print readings/statistics.
 - Trajectory replay reads the same CSV recording in all three languages
   (`vega_1/data/vega-1_dance.csv`: an optional `control_hz,<rate>` line, a
   `component:joint_index` header, one row per tick). Python still accepts
@@ -192,7 +192,6 @@ Known differences:
 | `basic_examples/sensors/monitor_2d_lidar_scans` | [source](vega_1/python/basic_examples/sensors/monitor_2d_lidar_scans.py) | [source](vega_1/cpp/basic_examples/sensors/monitor_2d_lidar_scans.cpp) | [sensor-monitor-2d-lidar-scans](vega_1/rust/src/basic_examples/sensors/monitor_2d_lidar_scans.rs) |
 | `basic_examples/sensors/read_joint_states` | [source](vega_1/python/basic_examples/sensors/read_joint_states.py) | [source](vega_1/cpp/basic_examples/sensors/read_joint_states.cpp) | [sensor-read-joint-states](vega_1/rust/src/basic_examples/sensors/read_joint_states.rs) |
 | `basic_examples/sensors/read_component_temperatures` | [source](vega_1/python/basic_examples/sensors/read_component_temperatures.py) | [source](vega_1/cpp/basic_examples/sensors/read_component_temperatures.cpp) | [sensor-read-component-temperatures](vega_1/rust/src/basic_examples/sensors/read_component_temperatures.rs) |
-| `basic_examples/sensors/read_ultrasonic_ranges` | [source](vega_1/python/basic_examples/sensors/read_ultrasonic_ranges.py) | [source](vega_1/cpp/basic_examples/sensors/read_ultrasonic_ranges.cpp) | [sensor-read-ultrasonic-ranges](vega_1/rust/src/basic_examples/sensors/read_ultrasonic_ranges.rs) |
 | `basic_examples/sensors/monitor_wrist_cameras` | [source](vega_1/python/basic_examples/sensors/monitor_wrist_cameras.py) | [source](vega_1/cpp/basic_examples/sensors/monitor_wrist_cameras.cpp) | [sensor-monitor-wrist-cameras](vega_1/rust/src/basic_examples/sensors/monitor_wrist_cameras.rs) |
 | `benchmark/arm_tracking/benchmark_arm_sine` | [source](vega_1/python/benchmark/arm_tracking/benchmark_arm_sine.py) | [source](vega_1/cpp/benchmark/arm_tracking/benchmark_arm_sine.cpp) | [benchmark-arm-sine](vega_1/rust/src/benchmark/arm_tracking/benchmark_arm_sine.rs) |
 | `benchmark/arm_tracking/benchmark_arm_step` | [source](vega_1/python/benchmark/arm_tracking/benchmark_arm_step.py) | [source](vega_1/cpp/benchmark/arm_tracking/benchmark_arm_step.cpp) | [benchmark-arm-step](vega_1/rust/src/benchmark/arm_tracking/benchmark_arm_step.rs) |

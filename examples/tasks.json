@@ -316,10 +316,12 @@
         "timeout"
       ],
       "behavior": {
-        "summary": "Move one arm to a named pose using its model-declared reference frame.",
+        "summary": "Move arms to a named pose using their model-declared reference frames.",
         "default": "Move the right arm to L_shape with model-defined torso-pitch compensation; wait up to 10 s. folded and folded_closed_hand stay joint-relative and receive no compensation. zero stores seven zeros relative to an upright torso and compensates only torso tilt from upright; --passthrough returns literal zeros. --passthrough uses raw stored values while retaining target validation. No collision checking is performed.",
         "connection": "control",
-        "language_notes": {}
+        "language_notes": {
+          "python": "--side both resolves both arm targets before starting a group motion and waits up to --timeout seconds for the group. Starts are not synchronized."
+        }
       }
     },
     {
@@ -656,7 +658,7 @@
       ],
       "behavior": {
         "summary": "Monitor point clouds from one 3D LiDAR.",
-        "default": "Enable the front 3D LiDAR, wait up to 10 s for activity, and poll 100 times at 0.1 s intervals. --position back selects the rear LiDAR; no cloud file is saved.",
+        "default": "Enable the front 3D LiDAR, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. --position back selects the rear LiDAR; no cloud file is saved.",
         "connection": "control",
         "language_notes": {
           "python": "Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.",
@@ -684,7 +686,7 @@
       ],
       "behavior": {
         "summary": "Monitor the IMU associated with a 3D LiDAR.",
-        "default": "Enable lidar_3d_front_imu, wait up to 10 s for activity, and print 100 observations at 0.05 s intervals. --sensor selects another declared IMU.",
+        "default": "Enable lidar_3d_front, wait up to 10 s for its IMU stream, and print observations continuously at 0.05 s intervals until Ctrl+C. --samples N limits the number of polls. --sensor selects another sensor with an IMU capability.",
         "connection": "control",
         "language_notes": {}
       }
@@ -744,24 +746,28 @@
       "simulation": true,
       "cli_cpp": [
         "camera",
+        "no-display",
         "period",
         "samples",
-        "stream"
+        "stream",
+        "viewer-url"
       ],
       "cli_rust": [
         "camera",
+        "no-display",
         "period",
         "samples",
-        "stream"
+        "stream",
+        "viewer-url"
       ],
       "behavior": {
         "summary": "Monitor frames from configured chassis cameras.",
-        "default": "Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; poll 200 times at 30 Hz, then unsubscribe. No image files are saved.",
+        "default": "Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; monitor at 30 Hz until Ctrl+C by default. --samples N limits the number of polls. Unsubscribe on exit. No image files are saved.",
         "connection": "control",
         "language_notes": {
           "python": "Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.",
-          "cpp": "Prints numeric summaries/frame metadata; does not open a viewer.",
-          "rust": "Prints numeric summaries/frame metadata; does not open a viewer."
+          "cpp": "Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.",
+          "rust": "Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring."
         }
       }
     },
@@ -821,25 +827,29 @@
       "rust_bin": "sensor-monitor-head-camera",
       "simulation": true,
       "cli_cpp": [
+        "no-display",
         "period",
         "samples",
         "sensor",
-        "stream"
+        "stream",
+        "viewer-url"
       ],
       "cli_rust": [
+        "no-display",
         "period",
         "samples",
         "sensor",
-        "stream"
+        "stream",
+        "viewer-url"
       ],
       "behavior": {
         "summary": "Monitor frames from the configured head camera.",
-        "default": "Enable head_camera, subscribe to all advertised streams unless selected with --stream, and poll 200 times at 30 Hz before unsubscribing. The sensor name is configurable; no particular camera brand is required and no image files are saved.",
+        "default": "Enable head_camera, subscribe to all advertised streams unless selected with --stream, and monitor at 30 Hz until Ctrl+C by default, then unsubscribe. --samples N limits the number of polls. The sensor name is configurable; no particular camera brand is required and no image files are saved.",
         "connection": "control",
         "language_notes": {
           "python": "Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.",
-          "cpp": "Prints numeric summaries/frame metadata; does not open a viewer.",
-          "rust": "Prints numeric summaries/frame metadata; does not open a viewer."
+          "cpp": "Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.",
+          "rust": "Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring."
         }
       }
     },
@@ -862,10 +872,10 @@
       ],
       "behavior": {
         "summary": "Read and print observations from configured IMUs.",
-        "default": "Read head_imu and chassis_imu once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.",
+        "default": "Read IMU streams from head_camera and chassis_imu (when declared) once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.",
         "connection": "control",
         "language_notes": {
-          "python": "Requested IMUs are passed to Robot before filtering; an undeclared sensor can fail connection.",
+          "python": "Filters undeclared IMU names before connecting.",
           "cpp": "Filters undeclared IMU names before connecting.",
           "rust": "Filters undeclared IMU names before connecting."
         }
@@ -889,8 +899,8 @@
         "sensor"
       ],
       "behavior": {
-        "summary": "Monitor a bounded sequence of 2D LiDAR scans.",
-        "default": "Enable lidar_2d_front, wait up to 10 s for activity, and poll 200 times at 0.1 s intervals. Display XY points or range summaries; no scan file is saved.",
+        "summary": "Monitor live 2D LiDAR scans.",
+        "default": "Enable lidar_2d_front, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. Display XY points or range summaries; no scan file is saved.",
         "connection": "control",
         "language_notes": {
           "python": "Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.",
@@ -944,30 +954,6 @@
       }
     },
     {
-      "task": "basic_examples/sensors/read_ultrasonic_ranges",
-      "python": "vega_1/python/basic_examples/sensors/read_ultrasonic_ranges.py",
-      "cpp": "vega_1/cpp/basic_examples/sensors/read_ultrasonic_ranges.cpp",
-      "rust": "vega_1/rust/src/basic_examples/sensors/read_ultrasonic_ranges.rs",
-      "rust_bin": "sensor-read-ultrasonic-ranges",
-      "simulation": true,
-      "cli_cpp": [
-        "period",
-        "samples",
-        "sensor"
-      ],
-      "cli_rust": [
-        "period",
-        "samples",
-        "sensor"
-      ],
-      "behavior": {
-        "summary": "Read and print ultrasonic ranges.",
-        "default": "Enable ultrasonic, wait up to 5 s for activity, and print one observation by default. Optional repeated reads use a 0.1 s interval.",
-        "connection": "control",
-        "language_notes": {}
-      }
-    },
-    {
       "task": "basic_examples/sensors/monitor_wrist_cameras",
       "python": "vega_1/python/basic_examples/sensors/monitor_wrist_cameras.py",
       "cpp": "vega_1/cpp/basic_examples/sensors/monitor_wrist_cameras.cpp",
@@ -975,25 +961,29 @@
       "rust_bin": "sensor-monitor-wrist-cameras",
       "simulation": true,
       "cli_cpp": [
+        "no-display",
         "period",
         "samples",
         "sensor",
-        "stream"
+        "stream",
+        "viewer-url"
       ],
       "cli_rust": [
+        "no-display",
         "period",
         "samples",
         "sensor",
-        "stream"
+        "stream",
+        "viewer-url"
       ],
       "behavior": {
         "summary": "Monitor frames from the configured wrist cameras.",
-        "default": "Enable left_wrist_camera and right_wrist_camera unless --sensor supplies names. Subscribe to selected/all advertised streams, poll 200 times at 30 Hz, then unsubscribe. No particular camera brand is required and no image files are saved.",
+        "default": "Enable left_wrist_camera and right_wrist_camera unless --sensor supplies names. Subscribe to selected/all advertised streams, monitor at 30 Hz until Ctrl+C by default, then unsubscribe. --samples N limits the number of polls. No particular camera brand is required and no image files are saved.",
         "connection": "control",
         "language_notes": {
           "python": "Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.",
-          "cpp": "Prints numeric summaries/frame metadata; does not open a viewer.",
-          "rust": "Prints numeric summaries/frame metadata; does not open a viewer."
+          "cpp": "Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.",
+          "rust": "Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring."
         }
       }
     },

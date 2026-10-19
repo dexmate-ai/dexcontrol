@@ -10,7 +10,7 @@
 
 [package]
 name = "dexcontrol-examples"
-version = "0.7.7-rc.4"
+version = "0.8.0"
 edition = "2021"
 rust-version = "1.90"
 license = "AGPL-3.0-only OR LicenseRef-Dexmate-Commercial"
@@ -109,10 +109,6 @@ name = "sensor-read-component-temperatures"
 path = "src/basic_examples/sensors/read_component_temperatures.rs"
 
 [[bin]]
-name = "sensor-read-ultrasonic-ranges"
-path = "src/basic_examples/sensors/read_ultrasonic_ranges.rs"
-
-[[bin]]
 name = "sensor-monitor-wrist-cameras"
 path = "src/basic_examples/sensors/monitor_wrist_cameras.rs"
 
@@ -207,3 +203,7 @@ path = "src/benchmark/arm_tracking/benchmark_arm_sine.rs"
 [[bin]]
 name = "benchmark-arm-step"
 path = "src/benchmark/arm_tracking/benchmark_arm_step.rs"
+
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("native-viewer"))'] }

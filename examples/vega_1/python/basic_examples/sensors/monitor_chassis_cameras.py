@@ -10,7 +10,7 @@
 
 """Monitor frames from configured chassis cameras.
 
-Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; poll 200 times at 30 Hz, then unsubscribe. No image files are saved.
+Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; monitor at 30 Hz until Ctrl+C by default. --samples N limits the number of polls. Unsubscribe on exit. No image files are saved.
 
 Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
 
@@ -36,7 +36,9 @@ class Args(ViewerOptions):
     stream: Annotated[List[str], tyro.conf.UseAppendAction] = field(
         default_factory=lambda: []
     )
-    samples: int = 200
+    samples: Annotated[
+        Optional[int], tyro.conf.arg(help="Number of polls; omit to monitor until Ctrl+C")
+    ] = None
     period: float = 1 / 30
     simulated: Annotated[bool, tyro.conf.arg(help="Use the in-process simulation")] = (
         False
@@ -51,6 +53,9 @@ class Args(ViewerOptions):
 
 def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
+
+    if args.samples is not None and args.samples < 0:
+        raise ValueError("--samples must be non-negative")
 
     configured = robot_config(profile=args.profile, config_file=args.config).get("sensors", {})
     names = args.camera or [
@@ -78,10 +83,11 @@ def main() -> None:
         for name, stream in subscribed:
             cameras[name].subscribe(stream)
 
-        visualize = start("chassis-cameras", args)
-        started = time.monotonic()
         try:
-            for index in range(args.samples):
+            visualize = start("chassis-cameras", args)
+            started = time.monotonic()
+            index = 0
+            while args.samples is None or index < args.samples:
                 if visualize:
                     set_sample_time(index, time.monotonic() - started)
                 for name, stream in subscribed:
@@ -92,7 +98,11 @@ def main() -> None:
                         log_frame(f"{name}/{stream}", frame)
                     else:
                         print(f"{name}/{stream}: shape={frame['data'].shape}")
-                time.sleep(args.period)
+                index += 1
+                if args.samples is None or index < args.samples:
+                    time.sleep(args.period)
+        except KeyboardInterrupt:
+            pass
         finally:
             for name, stream in subscribed:
                 cameras[name].unsubscribe(stream)

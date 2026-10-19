@@ -63,6 +63,24 @@ else()
     message(STATUS "dexcontrol examples: in-tree ${_profile} ${_lib}")
 endif()
 
+# A packaged control SDK remains usable with only a C++ toolchain. The
+# optional viewer has its own native build and can be enabled explicitly.
+set(_viewer_default ON)
+if(dexcontrol_FOUND AND NOT DEXCONTROL_IN_TREE)
+    set(_viewer_default OFF)
+endif()
+option(DEXCONTROL_WITH_VIEWER "Build reusable Rerun image visualization" ${_viewer_default})
+if(DEXCONTROL_WITH_VIEWER)
+    if(DEXCONTROL_CARGO_PROFILE)
+        set(DEXCONTROL_VIEWER_PROFILE "${DEXCONTROL_CARGO_PROFILE}" CACHE STRING "Viewer Cargo profile")
+    endif()
+    if(DEXCONTROL_CARGO_TARGET_DIR)
+        set(DEXCONTROL_VIEWER_TARGET_DIR "${DEXCONTROL_CARGO_TARGET_DIR}" CACHE PATH "Viewer Cargo target directory")
+    endif()
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../crates/dexcontrol-viewer"
+                     "${CMAKE_BINARY_DIR}/viewer")
+endif()
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Werror)
 endif()
@@ -82,6 +100,10 @@ foreach(_source IN LISTS _sources)
     add_executable("${_target}" "${_source}")
     target_include_directories("${_target}" PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/common")
     target_link_libraries("${_target}" PRIVATE ${DEXCONTROL_TARGET})
+    if(DEXCONTROL_WITH_VIEWER AND _name MATCHES "^monitor_(chassis_cameras|head_camera|wrist_cameras)$")
+        target_compile_definitions("${_target}" PRIVATE DEXCONTROL_WITH_VIEWER)
+        target_link_libraries("${_target}" PRIVATE dexcontrol::viewer)
+    endif()
     set_target_properties("${_target}" PROPERTIES
         OUTPUT_NAME "${_name}"
         # A generator expression prevents multi-config generators from appending

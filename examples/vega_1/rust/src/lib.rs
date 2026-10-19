@@ -25,6 +25,7 @@ const FLAGS: &[&str] = &[
     "unfold",
     "visualize",
     "no-confirm",
+    "no-display",
     "no-zero-force",
     "passthrough",
     "relative",
@@ -40,7 +41,77 @@ pub struct Args {
     positionals: Vec<String>,
 }
 
+pub struct ImageViewer {
+    #[cfg(feature = "native-viewer")]
+    inner: dexcontrol_viewer::Viewer,
+}
+
+impl ImageViewer {
+    fn is_open(&self) -> Result<bool> {
+        #[cfg(feature = "native-viewer")]
+        {
+            Ok(self.inner.is_open()?)
+        }
+        #[cfg(not(feature = "native-viewer"))]
+        {
+            Ok(false)
+        }
+    }
+
+    fn log_frame(&self, path: &str, frame: &dexcontrol::Frame) -> Result {
+        #[cfg(feature = "native-viewer")]
+        {
+            let info = frame.info()?;
+            let format = match frame.encoding()? {
+                dexcontrol::FrameEncoding::Rgb8 => dexcontrol_viewer::PixelFormat::Rgb8,
+                dexcontrol::FrameEncoding::Bgr8 => dexcontrol_viewer::PixelFormat::Bgr8,
+                dexcontrol::FrameEncoding::Gray8 => dexcontrol_viewer::PixelFormat::Gray8,
+                dexcontrol::FrameEncoding::Depth32F => dexcontrol_viewer::PixelFormat::Depth32F,
+                dexcontrol::FrameEncoding::Unknown(_) => {
+                    return Err(invalid("unsupported image encoding"))
+                }
+            };
+            let mut image =
+                dexcontrol_viewer::Image::new(info.width, info.height, format, frame.data()?)?;
+            image.timestamp_ns = (info.timestamp_ns != 0)
+                .then(|| i64::try_from(info.timestamp_ns).ok())
+                .flatten();
+            self.inner.log_image(path, image)?;
+        }
+        #[cfg(not(feature = "native-viewer"))]
+        let _ = (path, frame);
+        Ok(())
+    }
+}
+
 impl Args {
+    pub fn image_viewer(&self) -> Result<Option<ImageViewer>> {
+        if self.flag("no-display") {
+            return Ok(None);
+        }
+        #[cfg(feature = "native-viewer")]
+        {
+            let mut options = dexcontrol_viewer::Options::new("dexcontrol-cameras");
+            let url = self.text("viewer-url", "");
+            if !url.is_empty() {
+                options.viewer_url = Some(url);
+            }
+            Ok(Some(ImageViewer {
+                inner: dexcontrol_viewer::Viewer::new(options)?,
+            }))
+        }
+        #[cfg(not(feature = "native-viewer"))]
+        {
+            if self.has("viewer-url") {
+                return Err(invalid("this build does not include image visualization"));
+            }
+            eprintln!(
+                "Image visualization is not included in this build; printing frame metadata."
+            );
+            Ok(None)
+        }
+    }
+
     pub fn parse(description: &'static str, task_options: &[&str]) -> Self {
         let mut parsed = Self {
             description,
@@ -327,6 +398,23 @@ pub async fn pause(duration: Duration) {
     }
 }
 
+/// Wait for the typed IMU sample, independently of a camera's image activity.
+pub async fn wait_for_imu(robot: &Robot, sensor: &str, timeout: Duration) -> Result {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        match robot.imu(sensor, None) {
+            Ok(_) => return Ok(()),
+            // DEX_STATE_UNAVAILABLE from the public C ABI: retry only missing data.
+            Err(error) if error.code == 6 => {}
+            Err(error) => return Err(error.into()),
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(invalid(format!("{sensor} IMU did not become active")));
+        }
+        pause(Duration::from_millis(20)).await;
+    }
+}
+
 pub fn component_name(side: &str, component: &str) -> String {
     format!("{side}_{component}")
 }
@@ -344,8 +432,9 @@ pub async fn print_camera_frames(
     robot: &Robot,
     sensors: &[String],
     requested_streams: &[String],
-    samples: usize,
+    samples: Option<usize>,
     period: Duration,
+    viewer: Option<&ImageViewer>,
 ) -> Result {
     let mut subscriptions = Vec::new();
     // Keep subscription setup in the guarded scope so partial setup is cleaned up too.
@@ -362,10 +451,27 @@ pub async fn print_camera_frames(
                 subscriptions.push((sensor.clone(), stream));
             }
         }
-        for _ in 0..samples {
+        let mut index = 0;
+        let mut previous = BTreeMap::new();
+        while samples.is_none_or(|limit| index < limit) {
+            if let Some(viewer) = viewer {
+                if !viewer.is_open()? {
+                    break;
+                }
+            }
             for (sensor, stream) in &subscriptions {
                 if let Some(frame) = robot.camera(sensor)?.latest_frame(stream)? {
                     let info = frame.info()?;
+                    if let Some(viewer) = viewer {
+                        let path = format!("{sensor}/{stream}");
+                        if info.timestamp_ns != 0 && previous.get(&path) == Some(&info.timestamp_ns)
+                        {
+                            continue;
+                        }
+                        viewer.log_frame(&path, &frame)?;
+                        previous.insert(path, info.timestamp_ns);
+                        continue;
+                    }
                     println!(
                         "{sensor}/{stream}: shape=({}, {}) {:?} {} bytes",
                         info.height,
@@ -375,7 +481,10 @@ pub async fn print_camera_frames(
                     );
                 }
             }
-            pause(period).await;
+            index += 1;
+            if samples.is_none_or(|limit| index < limit) {
+                pause(period).await;
+            }
         }
         Ok(())
     }
@@ -549,6 +658,29 @@ mod cleanup_tests {
         });
         assert!(task.await.unwrap_err().is_panic());
         assert!(head.get_joint_pos().is_err());
+    }
+
+    #[tokio::test]
+    async fn camera_imu_readiness_does_not_require_image_frames() {
+        let robot = Robot::connect(ConnectOptions {
+            profile: Some("vega_1"),
+            simulated: true,
+            enable_sensors: vec!["head_camera"],
+            ..Default::default()
+        })
+        .unwrap();
+        wait_for_imu(&robot, "head_camera", Duration::ZERO)
+            .await
+            .unwrap();
+        assert!(!robot
+            .camera("head_camera")
+            .unwrap()
+            .is_active(None, Duration::from_secs(1))
+            .unwrap());
+        assert!(wait_for_imu(&robot, "missing", Duration::ZERO)
+            .await
+            .is_err());
+        robot.close().unwrap();
     }
 
     #[test]

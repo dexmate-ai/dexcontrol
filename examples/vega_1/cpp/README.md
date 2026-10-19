@@ -27,7 +27,7 @@ remain available below.
 
 See [what each example does](../../BEHAVIOR.md) for exact defaults, setup motions, output, completion conditions and language differences. [Renamed files](../../RENAMED.md) maps old paths to current paths.
 
-There are **46 shared tasks**: 44 use a Robot control connection and two use read-only diagnostics. A Robot connection may enable compatible arm modes at startup and requests a stop during shutdown, even if the main task only reads data. Shared Robot programs use real hardware unless `--simulated` is supplied.
+There are **45 shared tasks**: 43 use a Robot control connection and two use read-only diagnostics. A Robot connection may enable compatible arm modes at startup and requests a stop during shutdown, even if the main task only reads data. Shared Robot programs use real hardware unless `--simulated` is supplied.
 
 ## Build and run
 
@@ -43,9 +43,11 @@ Sourcing the SDK's `activate` script sets the CMake search path and places the
 watchdog executable on `PATH`. Alternatively, pass
 `-Ddexcontrol_DIR=/path/to/sdk/lib/cmake/dexcontrol` to CMake.
 
-C++ sensor monitors print summaries/frame metadata; they do not open a viewer or save images. Binaries mirror the source paths under `build/bin/`.
+C++ camera monitors open a Rerun viewer by default; `--no-display` prints frame metadata. Other sensor monitors print summaries. No sensor data is saved by default. Binaries mirror the source paths under `build/bin/`.
 
 ## Choosing an example
+
+All `monitor_*` examples run continuously by default until Ctrl+C. Use `--samples N` for a finite number of polls. Native camera monitors also stop when their viewer window is closed.
 
 Names distinguish an all-zero sweep from a small offset, direct torso setpoints from tracked motions, repeated monitoring from a single read, and brake operations from motor modes. Named joint poses are not Cartesian poses or homing procedures.
 
@@ -92,10 +94,9 @@ Managed motion does not provide collision avoidance. Wait timeouts bound client 
 | [basic_examples/sensors/read_hand_touch_forces.cpp](basic_examples/sensors/read_hand_touch_forces.cpp) | Read and print fingertip forces from one hand. |
 | [basic_examples/sensors/monitor_head_camera.cpp](basic_examples/sensors/monitor_head_camera.cpp) | Monitor frames from the configured head camera. |
 | [basic_examples/sensors/read_imu_states.cpp](basic_examples/sensors/read_imu_states.cpp) | Read and print observations from configured IMUs. |
-| [basic_examples/sensors/monitor_2d_lidar_scans.cpp](basic_examples/sensors/monitor_2d_lidar_scans.cpp) | Monitor a bounded sequence of 2D LiDAR scans. |
+| [basic_examples/sensors/monitor_2d_lidar_scans.cpp](basic_examples/sensors/monitor_2d_lidar_scans.cpp) | Monitor live 2D LiDAR scans. |
 | [basic_examples/sensors/read_joint_states.cpp](basic_examples/sensors/read_joint_states.cpp) | Print current joint states and chassis state. |
 | [basic_examples/sensors/read_component_temperatures.cpp](basic_examples/sensors/read_component_temperatures.cpp) | Print component temperatures and battery status. |
-| [basic_examples/sensors/read_ultrasonic_ranges.cpp](basic_examples/sensors/read_ultrasonic_ranges.cpp) | Read and print ultrasonic ranges. |
 | [basic_examples/sensors/monitor_wrist_cameras.cpp](basic_examples/sensors/monitor_wrist_cameras.cpp) | Monitor frames from the configured wrist cameras. |
 | [benchmark/arm_tracking/benchmark_arm_sine.cpp](benchmark/arm_tracking/benchmark_arm_sine.cpp) | Benchmark each arm joint with a sine trajectory and velocity feed-forward. |
 | [benchmark/arm_tracking/benchmark_arm_step.cpp](benchmark/arm_tracking/benchmark_arm_step.cpp) | Benchmark each arm joint with a ramped step trajectory. |
@@ -105,3 +106,17 @@ Managed motion does not provide collision avoidance. Wait timeouts bound client 
 | [troubleshooting/display_robot_info.cpp](troubleshooting/display_robot_info.cpp) | Display robot topology, observed state, and server diagnostics. |
 
 `cycle_torso` supports `--relative` for the outward offset. Both modes use planned moves and return to the stored absolute start only after outward success. The default delta is 0.05 rad; select another value with `--delta`.
+
+## Image visualization
+
+Camera monitors open an owned Rerun window when native visualization support
+is built. Packaged control-SDK examples use `--no-display` for terminal output.
+Install the viewer with
+`pip install rerun-sdk==0.36.2`; native image logging does not call Python.
+Use `--no-display` for terminal output or `--viewer-url HOST:PORT` for an
+existing viewer. Closing the window stops monitoring; exiting or killing the
+monitor closes its owned window. The native viewer build requires Rust 1.95+.
+
+With native visualization enabled, the reusable viewer supports both live
+streams and one-time images independently of Robot. See
+[visualization behavior](../../BEHAVIOR.md#connections-waiting-and-output).

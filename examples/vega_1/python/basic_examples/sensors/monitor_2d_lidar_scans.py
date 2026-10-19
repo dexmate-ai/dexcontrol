@@ -8,9 +8,9 @@
 # 2. Commercial License
 #    For commercial licensing terms, contact: contact@dexmate.ai
 
-"""Monitor a bounded sequence of 2D LiDAR scans.
+"""Monitor live 2D LiDAR scans.
 
-Enable lidar_2d_front, wait up to 10 s for activity, and poll 200 times at 0.1 s intervals. Display XY points or range summaries; no scan file is saved.
+Enable lidar_2d_front, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. Display XY points or range summaries; no scan file is saved.
 
 Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
 
@@ -33,7 +33,9 @@ class Args(ViewerOptions):
     """Command-line options."""
 
     sensor: str = "lidar_2d_front"
-    samples: int = 200
+    samples: Annotated[
+        Optional[int], tyro.conf.arg(help="Poll limit; omitted runs until Ctrl+C")
+    ] = None
     period: float = 0.1
     simulated: Annotated[bool, tyro.conf.arg(help="Use the in-process simulation")] = (
         False
@@ -48,6 +50,8 @@ class Args(ViewerOptions):
 
 def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
+    if args.samples is not None and args.samples < 0:
+        raise ValueError("--samples must be non-negative")
 
     with Robot(
         enable_sensors=[args.sensor],
@@ -61,22 +65,26 @@ def main() -> None:
 
         visualize = start(args.sensor, args)
         started = time.monotonic()
-        for index in range(args.samples):
-            scan = lidar.get_obs()
-            if scan is not None:
-                points = scan_points(scan)
-                if visualize:
-                    import rerun as rr
+        try:
+            index = 0
+            while args.samples is None or index < args.samples:
+                scan = lidar.get_obs()
+                if scan is not None:
+                    points = scan_points(scan)
+                    if visualize:
+                        import rerun as rr
 
-                    set_sample_time(index, time.monotonic() - started)
-                    rr.log(args.sensor, rr.Points3D(points, radii=0.02))
-                else:
-                    ranges = np.linalg.norm(points[:, :2], axis=1)
-                    print(
-                        f"sample={index + 1} points={len(ranges)} min={ranges.min():.3f}"
-                    )
-            if index + 1 < args.samples:
-                time.sleep(args.period)
+                        set_sample_time(index, time.monotonic() - started)
+                        rr.log(args.sensor, rr.Points3D(points, radii=0.02))
+                    else:
+                        ranges = np.linalg.norm(points[:, :2], axis=1)
+                        low = ranges.min() if len(ranges) else float("nan")
+                        print(f"sample={index + 1} points={len(ranges)} min={low:.3f}")
+                index += 1
+                if args.samples is None or index < args.samples:
+                    time.sleep(args.period)
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":

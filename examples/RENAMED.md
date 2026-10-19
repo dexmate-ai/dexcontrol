@@ -60,7 +60,6 @@ Names were changed to describe executed actions. Old entrypoints are removed; up
 | `examples/cpp/basic_examples/sensors/get_live_2d_lidar_data.cpp` | [examples/vega_1/cpp/basic_examples/sensors/monitor_2d_lidar_scans.cpp](vega_1/cpp/basic_examples/sensors/monitor_2d_lidar_scans.cpp) |
 | `examples/cpp/basic_examples/sensors/get_robot_state.cpp` | [examples/vega_1/cpp/basic_examples/sensors/read_joint_states.cpp](vega_1/cpp/basic_examples/sensors/read_joint_states.cpp) |
 | `examples/cpp/basic_examples/sensors/get_temperature_data.cpp` | [examples/vega_1/cpp/basic_examples/sensors/read_component_temperatures.cpp](vega_1/cpp/basic_examples/sensors/read_component_temperatures.cpp) |
-| `examples/cpp/basic_examples/sensors/get_ultrasonic_sensor.cpp` | [examples/vega_1/cpp/basic_examples/sensors/read_ultrasonic_ranges.cpp](vega_1/cpp/basic_examples/sensors/read_ultrasonic_ranges.cpp) |
 | `examples/cpp/basic_examples/sensors/get_wrist_zed_x_one_data.cpp` | [examples/vega_1/cpp/basic_examples/sensors/monitor_wrist_cameras.cpp](vega_1/cpp/basic_examples/sensors/monitor_wrist_cameras.cpp) |
 | `examples/cpp/benchmark/arm_tracking/sin_benchmark.cpp` | [examples/vega_1/cpp/benchmark/arm_tracking/benchmark_arm_sine.cpp](vega_1/cpp/benchmark/arm_tracking/benchmark_arm_sine.cpp) |
 | `examples/cpp/benchmark/arm_tracking/step_benchmark.cpp` | [examples/vega_1/cpp/benchmark/arm_tracking/benchmark_arm_step.cpp](vega_1/cpp/benchmark/arm_tracking/benchmark_arm_step.cpp) |
@@ -109,7 +108,6 @@ Names were changed to describe executed actions. Old entrypoints are removed; up
 | `examples/python/basic_examples/sensors/get_live_2d_lidar_data.py` | [examples/vega_1/python/basic_examples/sensors/monitor_2d_lidar_scans.py](vega_1/python/basic_examples/sensors/monitor_2d_lidar_scans.py) |
 | `examples/python/basic_examples/sensors/get_robot_state.py` | [examples/vega_1/python/basic_examples/sensors/read_joint_states.py](vega_1/python/basic_examples/sensors/read_joint_states.py) |
 | `examples/python/basic_examples/sensors/get_temperature_data.py` | [examples/vega_1/python/basic_examples/sensors/read_component_temperatures.py](vega_1/python/basic_examples/sensors/read_component_temperatures.py) |
-| `examples/python/basic_examples/sensors/get_ultrasonic_sensor.py` | [examples/vega_1/python/basic_examples/sensors/read_ultrasonic_ranges.py](vega_1/python/basic_examples/sensors/read_ultrasonic_ranges.py) |
 | `examples/python/basic_examples/sensors/get_wrist_zed_x_one_data.py` | [examples/vega_1/python/basic_examples/sensors/monitor_wrist_cameras.py](vega_1/python/basic_examples/sensors/monitor_wrist_cameras.py) |
 | `examples/python/benchmark/arm_tracking/common.py` | [examples/vega_1/python/benchmark/arm_tracking/_tracking_helpers.py](vega_1/python/benchmark/arm_tracking/_tracking_helpers.py) |
 | `examples/python/benchmark/arm_tracking/sin_benchmark.py` | [examples/vega_1/python/benchmark/arm_tracking/benchmark_arm_sine.py](vega_1/python/benchmark/arm_tracking/benchmark_arm_sine.py) |
@@ -162,7 +160,6 @@ Names were changed to describe executed actions. Old entrypoints are removed; up
 | `examples/rust/src/basic_examples/sensors/get_live_2d_lidar_data.rs` | [examples/vega_1/rust/src/basic_examples/sensors/monitor_2d_lidar_scans.rs](vega_1/rust/src/basic_examples/sensors/monitor_2d_lidar_scans.rs) |
 | `examples/rust/src/basic_examples/sensors/get_robot_state.rs` | [examples/vega_1/rust/src/basic_examples/sensors/read_joint_states.rs](vega_1/rust/src/basic_examples/sensors/read_joint_states.rs) |
 | `examples/rust/src/basic_examples/sensors/get_temperature_data.rs` | [examples/vega_1/rust/src/basic_examples/sensors/read_component_temperatures.rs](vega_1/rust/src/basic_examples/sensors/read_component_temperatures.rs) |
-| `examples/rust/src/basic_examples/sensors/get_ultrasonic_sensor.rs` | [examples/vega_1/rust/src/basic_examples/sensors/read_ultrasonic_ranges.rs](vega_1/rust/src/basic_examples/sensors/read_ultrasonic_ranges.rs) |
 | `examples/rust/src/basic_examples/sensors/get_wrist_zed_x_one_data.rs` | [examples/vega_1/rust/src/basic_examples/sensors/monitor_wrist_cameras.rs](vega_1/rust/src/basic_examples/sensors/monitor_wrist_cameras.rs) |
 | `examples/rust/src/benchmark/arm_tracking/sin_benchmark.rs` | [examples/vega_1/rust/src/benchmark/arm_tracking/benchmark_arm_sine.rs](vega_1/rust/src/benchmark/arm_tracking/benchmark_arm_sine.rs) |
 | `examples/rust/src/benchmark/arm_tracking/step_benchmark.rs` | [examples/vega_1/rust/src/benchmark/arm_tracking/benchmark_arm_step.rs](vega_1/rust/src/benchmark/arm_tracking/benchmark_arm_step.rs) |

@@ -10,7 +10,7 @@
 
 // Read and print observations from configured IMUs.
 //
-// Read head_imu and chassis_imu once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.
+// Read IMU streams from head_camera and chassis_imu (when declared) once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.
 //
 // Filters undeclared IMU names before connecting.
 //
@@ -33,12 +33,12 @@ void print_imu(const std::string &name, const dex_imu_t &imu) {
 }  // namespace
 
 int main(int argc, char **argv) {
-    return examples::run(argc, argv, "Read and print observations from configured IMUs. Read head_imu and chassis_imu once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval. Filters undeclared IMU names before connecting. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
+    return examples::run(argc, argv, "Read and print observations from configured IMUs. Read IMU streams from head_camera and chassis_imu (when declared) once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval. Filters undeclared IMU names before connecting. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
                          [](const examples::Args &args) {
         const int samples = args.integer("samples", 1);
         const double period = args.number("period", 0.1);
         auto sensors = args.list("sensor");
-        if (sensors.empty()) sensors = {"head_imu", "chassis_imu"};
+        if (sensors.empty()) sensors = {"head_camera", "chassis_imu"};
 
         // Enabling a sensor the profile lacks fails at connect, so filter the
         // requested names through the profile's declared sensors first.
@@ -55,7 +55,19 @@ int main(int argc, char **argv) {
         if (available.empty()) throw std::runtime_error("none of the requested IMUs exist in this profile");
         auto robot = args.connect(available);
         for (const auto &name : available) {
-            if (!robot.wait_for_state(name, std::chrono::seconds{5})) std::cout << name << ": inactive\n";
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+            while (true) {
+                try {
+                    (void)robot.imu(name);
+                    break;
+                } catch (const dexcontrol::Error &error) {
+                    if (error.status() != DEX_STATE_UNAVAILABLE) throw;
+                }
+                if (std::chrono::steady_clock::now() >= deadline) {
+                    throw std::runtime_error(name + " IMU did not become active");
+                }
+                examples::sleep_for(0.02);
+            }
         }
         for (int index = 0; index < samples; ++index) {
             for (const auto &name : available) print_imu(name, robot.imu(name));

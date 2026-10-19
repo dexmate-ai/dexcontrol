@@ -8,9 +8,11 @@
 # 2. Commercial License
 #    For commercial licensing terms, contact: contact@dexmate.ai
 
-"""Move one arm to a named pose using its model-declared reference frame.
+"""Move arms to a named pose using their model-declared reference frames.
 
 Move the right arm to L_shape with model-defined torso-pitch compensation; wait up to 10 s. folded and folded_closed_hand stay joint-relative and receive no compensation. zero stores seven zeros relative to an upright torso and compensates only torso tilt from upright; --passthrough returns literal zeros. --passthrough uses raw stored values while retaining target validation. No collision checking is performed.
+
+--side both resolves both arm targets before starting a group motion and waits up to --timeout seconds for the group. Starts are not synchronized.
 
 Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
 
@@ -26,7 +28,7 @@ from typing_extensions import Annotated
 class Args:
     """Command-line options."""
 
-    side: Literal["left", "right"] = "right"
+    side: Literal["left", "right", "both"] = "right"
     pose: str = "L_shape"
     passthrough: bool = False
     timeout: float = 10.0
@@ -46,13 +48,19 @@ def main() -> None:
     with Robot(
         simulation=args.simulated, profile=args.profile, config_file=args.config
     ) as robot:
-        name = f"{args.side}_arm"
-        target = robot.joints(name).get_pose(args.pose, passthrough=args.passthrough)
-        print(
-            robot.joints(name)
-            .move_to_joint_pos(target, wait=False)
-            .wait(timeout=args.timeout)
-        )
+        sides = ("left", "right") if args.side == "both" else (args.side,)
+        targets = {
+            f"{side}_arm": robot.joints(f"{side}_arm").get_pose(
+                args.pose, passthrough=args.passthrough
+            )
+            for side in sides
+        }
+        if args.side == "both":
+            motion = robot.move_to_joint_pos(targets, wait=False)
+        else:
+            name = f"{args.side}_arm"
+            motion = robot.joints(name).move_to_joint_pos(targets[name], wait=False)
+        print(motion.wait(timeout=args.timeout))
 
 
 if __name__ == "__main__":

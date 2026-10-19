@@ -24,13 +24,12 @@ Download a release from [GitHub Releases](https://github.com/dexmate-ai/dexcontr
 or clone the matching version of this repository:
 
 ```bash
-git clone --branch v0.7.7-rc.4 https://github.com/dexmate-ai/dexcontrol.git
+git clone --branch v0.8.0 https://github.com/dexmate-ai/dexcontrol.git
 cd dexcontrol
 ```
 
-This release candidate uses `0.7.7rc4` on PyPI and `0.7.7-rc.4` for Rust and
-the native SDK. Keep the repository, Python package, native SDK, and Rust
-dependency on the same release.
+This release uses `0.8.0` for Python, Rust, and the native SDK. Keep the repository,
+Python package, native SDK, and Rust dependency on the same release.
 Run the example commands from the repository root.
 
 ## Run examples
@@ -71,7 +70,7 @@ See [example behavior](examples/BEHAVIOR.md) before running a task.
 Python and C++ tasks can be selected by filename without its extension:
 
 ```bash
-python -m pip install 'dexcontrol[examples]==0.7.7rc4'
+python -m pip install 'dexcontrol[examples]==0.8.0'
 ./run python cycle_arm --simulated --profile vega_1 --delta 0.01
 ./run cpp cycle_arm --simulated --profile vega_1 --delta 0.01
 ./run python replay_trajectory --help
@@ -99,7 +98,7 @@ macOS Intel/Apple Silicon. No C++ or Rust compiler is needed.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install dexcontrol==0.7.7rc4
+python -m pip install dexcontrol==0.8.0
 ./run python read_joint_positions
 ```
 
@@ -148,8 +147,8 @@ For example, on Linux x86_64, place both downloads in the repository root:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
-python3 install_sdk.py dexcontrol-sdk-v0.7.7-rc.4-linux-x86_64.tar.gz "$HOME/.local/dexcontrol/0.7.7-rc.4"
-source "$HOME/.local/dexcontrol/0.7.7-rc.4/activate"
+python3 install_sdk.py dexcontrol-sdk-v0.8.0-linux-x86_64.tar.gz "$HOME/.local/dexcontrol/0.8.0"
+source "$HOME/.local/dexcontrol/0.8.0/activate"
 ```
 
 On macOS, use `shasum -a 256 <archive>` and compare the digest with the matching
@@ -235,7 +234,7 @@ For your own application:
 ```bash
 cargo new my_robot
 cd my_robot
-cargo add dexcontrol@=0.7.7-rc.4
+cargo add dexcontrol@=0.8.0
 ```
 
 Replace `src/main.rs` with:
@@ -295,6 +294,57 @@ Browse the API definitions for more options:
 - [Python types and methods](python/dexcontrol/_native.pyi)
 - [C++ API](include/dexcontrol/dexcontrol.hpp)
 - [Rust API](rust/dexcontrol/src/lib.rs)
+
+## Sensor data
+
+Enable the sensors your application needs, then use their typed accessors.
+The following example reads a head-camera image on a real robot:
+
+```python
+from dexcontrol import Robot
+
+with Robot(profile="vega_1p", enable_sensors=["head_camera"]) as robot:
+    camera = robot.sensors.get_camera("head_camera")
+    print(camera.streams)
+    camera.subscribe("left_rgb")
+    try:
+        frame = camera.wait_for_frame("left_rgb", timeout=5.0)
+        if frame is not None:
+            print(frame["data"].shape, frame["timestamp_ns"])
+    finally:
+        camera.unsubscribe("left_rgb")
+```
+
+A camera frame contains `data` (a NumPy array), `timestamp_ns`, and `frame_id`.
+Images require an explicit stream subscription. Use `camera.streams` to select
+an available stream. Simulation can exercise subscriptions but does not generate
+camera images. A normal Robot connection can enable compatible arm modes during
+startup; use the simulated connection when testing without hardware.
+
+Other Python reads are:
+
+| Data | Accessor on `robot.sensors` | Read |
+| --- | --- | --- |
+| IMU | `get_imu(name)` | `get_obs()` — `acc`, `gyro`, `quat`, `timestamp_ns` |
+| 2D LiDAR | `get_lidar_2d(name)` | `get_obs()` — ranges, angles, qualities, timestamp |
+| 3D LiDAR | `get_lidar_3d(name)` | `get_points()` — `(N, 3)` XYZ array |
+| Wrist force/torque | `get_wrench("left_arm")` | `get_wrench_state()` |
+| Component temperatures | `get_temperature("left_arm")` | `get_temperatures()` |
+
+IMU, LiDAR, and wrench handles provide `wait_for_active(timeout=5.0)`. Reads return the
+latest cached sample, not necessarily a new one; observation and frame reads
+can return `None` before data arrives. Check timestamps or state-handle
+`get_age()` / `is_active(window=...)` when freshness matters.
+
+Inspect the sensor names declared by your installed SDK without connecting:
+
+```python
+from dexcontrol import robot_config
+
+config = robot_config(profile="vega_1p")
+for name, sensor in config["sensors"].items():
+    print(name, [cap["id"] for cap in sensor["capabilities"]])
+```
 
 ## Camera streams
 

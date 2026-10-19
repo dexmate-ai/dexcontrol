@@ -10,7 +10,7 @@
 
 //! Monitor the IMU associated with a 3D LiDAR.
 //!
-//! Enable lidar_3d_front_imu, wait up to 10 s for activity, and print 100 observations at 0.05 s intervals. --sensor selects another declared IMU.
+//! Enable lidar_3d_front, wait up to 10 s for its IMU stream, and print observations continuously at 0.05 s intervals until Ctrl+C. --samples N limits the number of polls. --sensor selects another sensor with an IMU capability.
 //!
 //! Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.
 
@@ -20,20 +20,21 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result {
     let args = Args::parse(
-        "Monitor the IMU associated with a 3D LiDAR. Enable lidar_3d_front_imu, wait up to 10 s for activity, and print 100 observations at 0.05 s intervals. --sensor selects another declared IMU. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
+        "Monitor the IMU associated with a 3D LiDAR. Enable lidar_3d_front, wait up to 10 s for its IMU stream, and print observations continuously at 0.05 s intervals until Ctrl+C. --samples N limits the number of polls. --sensor selects another sensor with an IMU capability. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
         &["period", "samples", "sensor"],
     );
-    let sensor = args.text("sensor", "lidar_3d_front_imu");
-    let samples = args.integer("samples", 100)?;
+    let sensor = args.text("sensor", "lidar_3d_front");
+    let samples = if args.has("samples") {
+        Some(args.integer("samples", 0)?)
+    } else {
+        None
+    };
     let period = args.duration("period", 0.05)?;
     let robot = args.connect(std::slice::from_ref(&sensor)).await?;
     dexcontrol_examples::run_robot(&robot, async {
-        if !robot.wait_for_state(&sensor, Duration::from_secs(10))? {
-            return Err(dexcontrol_examples::invalid(format!(
-                "{sensor} did not become active"
-            )));
-        }
-        for _ in 0..samples {
+        dexcontrol_examples::wait_for_imu(&robot, &sensor, Duration::from_secs(10)).await?;
+        let mut index = 0;
+        while samples.is_none_or(|limit| index < limit) {
             let state = robot.imu(&sensor, None)?.value;
             println!(
                 "acceleration={} angular_velocity={} orientation={}",
@@ -41,7 +42,10 @@ async fn main() -> Result {
                 format(&state.angular_velocity),
                 format(&state.orientation)
             );
-            pause(period).await;
+            index += 1;
+            if samples.is_none_or(|limit| index < limit) {
+                pause(period).await;
+            }
         }
         Ok(())
     })

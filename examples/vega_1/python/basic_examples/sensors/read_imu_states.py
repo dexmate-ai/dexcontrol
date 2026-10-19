@@ -10,9 +10,9 @@
 
 """Read and print observations from configured IMUs.
 
-Read head_imu and chassis_imu once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.
+Read IMU streams from head_camera and chassis_imu (when declared) once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.
 
-Requested IMUs are passed to Robot before filtering; an undeclared sensor can fail connection.
+Filters undeclared IMU names before connecting.
 
 Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
 
@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 import tyro
-from dexcontrol import Robot
+from dexcontrol import Robot, robot_config
 from typing_extensions import Annotated
 
 
@@ -48,7 +48,16 @@ class Args:
 
 def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
-    sensors = args.sensor or ["head_imu"]
+    requested = args.sensor or ["head_camera", "chassis_imu"]
+    declared = robot_config(profile=args.profile, config_file=args.config)["sensors"]
+    sensors = []
+    for name in requested:
+        if name in declared:
+            sensors.append(name)
+        else:
+            print(f"{name}: not declared by this profile, skipping")
+    if not sensors:
+        raise SystemExit("none of the requested IMUs exist in this profile")
     with Robot(
         enable_sensors=sensors,
         simulation=args.simulated,

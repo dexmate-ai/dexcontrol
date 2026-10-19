@@ -261,7 +261,7 @@ fn sensor_snapshots_outlive_connection_and_cameras_report_missing_frames() {
     let robot = Robot::connect(ConnectOptions {
         profile: Some("vega_1"),
         simulated: true,
-        enable_sensors: vec!["head_imu", "lidar_2d_front", "head_camera"],
+        enable_sensors: vec!["lidar_2d_front", "head_camera"],
         ..Default::default()
     })
     .unwrap();
@@ -273,7 +273,7 @@ fn sensor_snapshots_outlive_connection_and_cameras_report_missing_frames() {
             .voltage
             > 0.
     );
-    assert!(robot.imu("head_imu", None).unwrap().value.timestamp_ns > 0);
+    assert!(robot.imu("head_camera", None).unwrap().value.timestamp_ns > 0);
     let scan = robot.lidar_2d("lidar_2d_front", None).unwrap();
     let lidar_robot = Robot::connect(ConnectOptions {
         profile: Some("vega_1p"),
@@ -283,6 +283,14 @@ fn sensor_snapshots_outlive_connection_and_cameras_report_missing_frames() {
     })
     .unwrap();
     let cloud = lidar_robot.lidar_3d("lidar_3d_front", None).unwrap();
+    assert!(
+        lidar_robot
+            .imu("lidar_3d_front", None)
+            .unwrap()
+            .value
+            .timestamp_ns
+            > 0
+    );
     lidar_robot.close().unwrap();
     drop(lidar_robot);
     let camera = robot.camera("head_camera").unwrap();

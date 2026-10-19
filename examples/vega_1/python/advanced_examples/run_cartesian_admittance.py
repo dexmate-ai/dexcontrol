@@ -138,14 +138,15 @@ def preprocess_wrench(
     wrench = wrench - init_wrench
 
     # Reorder and threshold forces
-    force_reorder = [-1, 0, 2] if arm == "left" else [1, 0, 2]
-    force = np.array([np.sign(i) * wrench[abs(i)] for i in force_reorder])
+    # Keep signs separate from indices: index zero is the fx axis, not a zero gain.
+    force_signs = np.array([-1, 1, 1] if arm == "left" else [1, 1, 1])
+    force = wrench[[1, 0, 2]] * force_signs
     force_margin = np.clip(force, -force_threshold, force_threshold)
     force = force - force_margin
 
     # Reorder and threshold torques
-    torque_reorder = [-4, 3, 5] if arm == "left" else [4, -3, 5]
-    torque = np.array([np.sign(i) * wrench[abs(i)] for i in torque_reorder])
+    torque_signs = np.array([-1, 1, 1] if arm == "left" else [1, -1, 1])
+    torque = wrench[[4, 3, 5]] * torque_signs
     torque_margin = np.clip(torque, -torque_threshold, torque_threshold)
     torque = torque - torque_margin
 

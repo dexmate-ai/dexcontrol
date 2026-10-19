@@ -8,9 +8,9 @@
 // 2. Commercial License
 //    For commercial licensing terms, contact: contact@dexmate.ai
 
-//! Monitor a bounded sequence of 2D LiDAR scans.
+//! Monitor live 2D LiDAR scans.
 //!
-//! Enable lidar_2d_front, wait up to 10 s for activity, and poll 200 times at 0.1 s intervals. Display XY points or range summaries; no scan file is saved.
+//! Enable lidar_2d_front, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. Display XY points or range summaries; no scan file is saved.
 //!
 //! Prints numeric summaries/frame metadata; does not open a viewer.
 //!
@@ -22,11 +22,15 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result {
     let args = Args::parse(
-        "Monitor a bounded sequence of 2D LiDAR scans. Enable lidar_2d_front, wait up to 10 s for activity, and poll 200 times at 0.1 s intervals. Display XY points or range summaries; no scan file is saved. Prints numeric summaries/frame metadata; does not open a viewer. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
+        "Monitor live 2D LiDAR scans. Enable lidar_2d_front, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. Display XY points or range summaries; no scan file is saved. Prints numeric summaries/frame metadata; does not open a viewer. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
         &["period", "samples", "sensor"],
     );
     let sensor = args.text("sensor", "lidar_2d_front");
-    let samples = args.integer("samples", 200)?;
+    let samples = if args.has("samples") {
+        Some(args.integer("samples", 0)?)
+    } else {
+        None
+    };
     let period = args.duration("period", 0.1)?;
     let robot = args.connect(std::slice::from_ref(&sensor)).await?;
     dexcontrol_examples::run_robot(&robot, async {
@@ -35,7 +39,8 @@ async fn main() -> Result {
                 "{sensor} did not become active"
             )));
         }
-        for index in 0..samples {
+        let mut index = 0;
+        while samples.is_none_or(|limit| index < limit) {
             let scan = robot.lidar_2d(&sensor, None)?;
             let finite = scan
                 .ranges()?
@@ -45,7 +50,10 @@ async fn main() -> Result {
                 .collect::<Vec<_>>();
             let low = finite.iter().copied().reduce(f64::min).unwrap_or(f64::NAN);
             println!("sample={} points={} min={low:.3}", index + 1, finite.len());
-            pause(period).await;
+            index += 1;
+            if samples.is_none_or(|limit| index < limit) {
+                pause(period).await;
+            }
         }
         Ok(())
     })

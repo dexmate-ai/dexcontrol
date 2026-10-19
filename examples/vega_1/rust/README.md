@@ -67,3 +67,17 @@ Seven additional runnable Python programs depend on Python-specific tooling or e
 These programs move physical hardware unless `--simulated` is present. Keep a
 hardware E-stop within reach, clear the workspace, and begin with the read-only
 diagnostic example.
+
+## Image visualization
+
+Camera monitors open an owned Rerun window when native visualization support
+is built. Packaged control-SDK examples use `--no-display` for terminal output.
+Install the viewer with
+`pip install rerun-sdk==0.36.2`; native image logging does not call Python.
+Use `--no-display` for terminal output or `--viewer-url HOST:PORT` for an
+existing viewer. Closing the window stops monitoring; exiting or killing the
+monitor closes its owned window. The native viewer build requires Rust 1.95+.
+
+With native visualization enabled, the reusable viewer supports both live
+streams and one-time images independently of Robot. See
+[visualization behavior](../../BEHAVIOR.md#connections-waiting-and-output).

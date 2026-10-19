@@ -10,7 +10,7 @@
 
 """Monitor the IMU associated with a 3D LiDAR.
 
-Enable lidar_3d_front_imu, wait up to 10 s for activity, and print 100 observations at 0.05 s intervals. --sensor selects another declared IMU.
+Enable lidar_3d_front, wait up to 10 s for its IMU stream, and print observations continuously at 0.05 s intervals until Ctrl+C. --samples N limits the number of polls. --sensor selects another sensor with an IMU capability.
 
 Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
 
@@ -29,9 +29,11 @@ class Args:
     """Command-line options."""
 
     sensor: Annotated[
-        str, tyro.conf.arg(help="IMU sensor name declared by the robot profile")
-    ] = "lidar_3d_front_imu"
-    samples: int = 100
+        str, tyro.conf.arg(help="Sensor name with an IMU stream declared by the robot profile")
+    ] = "lidar_3d_front"
+    samples: Annotated[
+        Optional[int], tyro.conf.arg(help="Poll limit; omitted runs until Ctrl+C")
+    ] = None
     period: float = 0.05
     simulated: Annotated[bool, tyro.conf.arg(help="Use the in-process simulation")] = (
         False
@@ -46,6 +48,8 @@ class Args:
 
 def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
+    if args.samples is not None and args.samples < 0:
+        raise ValueError("--samples must be non-negative")
     with Robot(
         enable_sensors=[args.sensor],
         simulation=args.simulated,
@@ -55,10 +59,15 @@ def main() -> None:
         imu = robot.sensors.get_imu(args.sensor)
         if not imu.wait_for_active(timeout=10.0):
             raise SystemExit(f"{args.sensor} did not become active")
-        for index in range(args.samples):
-            pprint.pp(imu.get_obs(), sort_dicts=False)
-            if index + 1 < args.samples:
-                time.sleep(args.period)
+        try:
+            index = 0
+            while args.samples is None or index < args.samples:
+                pprint.pp(imu.get_obs(), sort_dicts=False)
+                index += 1
+                if args.samples is None or index < args.samples:
+                    time.sleep(args.period)
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":

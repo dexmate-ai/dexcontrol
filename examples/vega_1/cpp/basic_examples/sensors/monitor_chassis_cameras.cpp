@@ -10,9 +10,9 @@
 
 // Monitor frames from configured chassis cameras.
 //
-// Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; poll 200 times at 30 Hz, then unsubscribe. No image files are saved.
+// Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; monitor at 30 Hz until Ctrl+C by default. --samples N limits the number of polls. Unsubscribe on exit. No image files are saved.
 //
-// Prints numeric summaries/frame metadata; does not open a viewer.
+// Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 //
 // Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.
 
@@ -20,7 +20,7 @@
 #include "json.hpp"
 
 int main(int argc, char **argv) {
-    return examples::run(argc, argv, "Monitor frames from configured chassis cameras. Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; poll 200 times at 30 Hz, then unsubscribe. No image files are saved. Prints numeric summaries/frame metadata; does not open a viewer. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
+    return examples::run(argc, argv, "Monitor frames from configured chassis cameras. Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; monitor at 30 Hz until Ctrl+C by default. --samples N limits the number of polls. Unsubscribe on exit. No image files are saved. Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
                          [](const examples::Args &args) {
         auto cameras = args.list("camera");
         if (cameras.empty()) {
@@ -38,8 +38,12 @@ int main(int argc, char **argv) {
             throw std::runtime_error(
                 "no chassis cameras are declared; pass --camera NAME or use a custom profile");
         }
+        const std::optional<int> samples = args.text("samples").empty()
+            ? std::nullopt : std::optional<int>{args.integer("samples", 0)};
+        if (samples && *samples < 0) throw std::invalid_argument("--samples must be non-negative");
+        auto viewer = examples::image_viewer(args);
         auto robot = args.connect(cameras);
-        examples::print_frames(robot, cameras, args.list("stream"), args.integer("samples", 200),
-                               args.number("period", 1.0 / 30.0));
-    }, {"camera", "period", "samples", "stream"});
+        examples::print_frames(robot, cameras, args.list("stream"), samples,
+                               args.number("period", 1.0 / 30.0), viewer.get());
+    }, {"camera", "period", "samples", "stream", "no-display", "viewer-url"});
 }

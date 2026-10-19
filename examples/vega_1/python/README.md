@@ -14,7 +14,7 @@ This software is dual-licensed:
 
 See [what each example does](../../BEHAVIOR.md) for exact defaults, setup motions, output, completion conditions and language differences. [Renamed files](../../RENAMED.md) maps old paths to current paths.
 
-There are **46 shared tasks**: 44 use a Robot control connection and two use read-only diagnostics. A Robot connection may enable compatible arm modes at startup and requests a stop during shutdown, even if the main task only reads data. Shared Robot programs use real hardware unless `--simulated` is supplied.
+There are **45 shared tasks**: 43 use a Robot control connection and two use read-only diagnostics. A Robot connection may enable compatible arm modes at startup and requests a stop during shutdown, even if the main task only reads data. Shared Robot programs use real hardware unless `--simulated` is supplied.
 
 ## Build and run
 
@@ -26,9 +26,11 @@ python examples/vega_1/python/basic_examples/control/cycle_arm.py --simulated --
 
 After Rust changes, `python tools/develop_python.py --profile release` builds/installs the wheel and refreshes the matching source-tree extension. `dexcontrol.build_info()` identifies the loaded build.
 
-Python camera/LiDAR/current monitors open or connect a Rerun viewer by default; `--no-display` prints instead. Missing `rerun-sdk` falls back to printing. Benchmarks additionally need NumPy/matplotlib; planning and arm gamepad programs need dexmotion; gamepad programs need a DualSense controller.
+Python camera/LiDAR/current monitors open or connect a Rerun viewer by default; `--no-display` prints instead. Each example launches its own viewer on a separate port so an old window is not silently reused. These viewers close when the example exits, including Ctrl+C, SIGTERM, or SIGKILL. An existing viewer selected with `--viewer-url` remains open. Missing `rerun-sdk` falls back to printing. Benchmarks additionally need NumPy/matplotlib; planning and arm gamepad programs need dexmotion; gamepad programs need a DualSense controller.
 
 ## Choosing an example
+
+All `monitor_*` examples run continuously by default until Ctrl+C. Use `--samples N` for a finite number of polls. Native camera monitors also stop when their viewer window is closed.
 
 Names distinguish an all-zero sweep from a small offset, direct torso setpoints from tracked motions, repeated monitoring from a single read, and brake operations from motor modes. Named joint poses are not Cartesian poses or homing procedures.
 
@@ -52,7 +54,7 @@ Managed motion does not provide collision avoidance. Wait timeouts bound client 
 | [advanced_examples/fold_or_unfold_robot.py](advanced_examples/fold_or_unfold_robot.py) | Fold or unfold the robot in ordered, verified stages. |
 | [advanced_examples/pose_arms_sequentially.py](advanced_examples/pose_arms_sequentially.py) | Move arms sequentially to a named pose without collision checking. |
 | [advanced_examples/keyboard_jog_joint.py](advanced_examples/keyboard_jog_joint.py) | Jog a selected joint using keyboard commands. |
-| [advanced_examples/move_to_pose/pose_arm.py](advanced_examples/move_to_pose/pose_arm.py) | Move one arm to a named pose using its model-declared reference frame. |
+| [advanced_examples/move_to_pose/pose_arm.py](advanced_examples/move_to_pose/pose_arm.py) | Move arms to a named pose using their model-declared reference frames. |
 | [advanced_examples/move_to_pose/pose_head.py](advanced_examples/move_to_pose/pose_head.py) | Move the head to a named pose using its model-declared reference frame. |
 | [advanced_examples/move_to_pose/pose_torso.py](advanced_examples/move_to_pose/pose_torso.py) | Move the torso to a named joint pose. |
 | [advanced_examples/reboot_control_board.py](advanced_examples/reboot_control_board.py) | Request a reboot of one robot control board. |
@@ -75,10 +77,9 @@ Managed motion does not provide collision avoidance. Wait timeouts bound client 
 | [basic_examples/sensors/read_hand_touch_forces.py](basic_examples/sensors/read_hand_touch_forces.py) | Read and print fingertip forces from one hand. |
 | [basic_examples/sensors/monitor_head_camera.py](basic_examples/sensors/monitor_head_camera.py) | Monitor frames from the configured head camera. |
 | [basic_examples/sensors/read_imu_states.py](basic_examples/sensors/read_imu_states.py) | Read and print observations from configured IMUs. |
-| [basic_examples/sensors/monitor_2d_lidar_scans.py](basic_examples/sensors/monitor_2d_lidar_scans.py) | Monitor a bounded sequence of 2D LiDAR scans. |
+| [basic_examples/sensors/monitor_2d_lidar_scans.py](basic_examples/sensors/monitor_2d_lidar_scans.py) | Monitor live 2D LiDAR scans. |
 | [basic_examples/sensors/read_joint_states.py](basic_examples/sensors/read_joint_states.py) | Print current joint states and chassis state. |
 | [basic_examples/sensors/read_component_temperatures.py](basic_examples/sensors/read_component_temperatures.py) | Print component temperatures and battery status. |
-| [basic_examples/sensors/read_ultrasonic_ranges.py](basic_examples/sensors/read_ultrasonic_ranges.py) | Read and print ultrasonic ranges. |
 | [basic_examples/sensors/monitor_wrist_cameras.py](basic_examples/sensors/monitor_wrist_cameras.py) | Monitor frames from the configured wrist cameras. |
 | [benchmark/arm_tracking/benchmark_arm_sine.py](benchmark/arm_tracking/benchmark_arm_sine.py) | Benchmark each arm joint with a sine trajectory and velocity feed-forward. |
 | [benchmark/arm_tracking/benchmark_arm_step.py](benchmark/arm_tracking/benchmark_arm_step.py) | Benchmark each arm joint with a ramped step trajectory. |

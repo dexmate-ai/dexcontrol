@@ -66,7 +66,7 @@ public:
     static std::set<std::string> &boolean_flags() {
         static std::set<std::string> flags{
             "help",          "simulated",       "unfold",          "visualize",
-            "no-confirm",    "no-zero-force",   "passthrough", "relative",
+            "no-confirm",    "no-zero-force", "no-display",   "passthrough", "relative",
             "velocity-compensation", "all",     "yes",
         };
         return flags;
@@ -256,6 +256,7 @@ inline int run(int argc, char **argv, const std::string &description,
     } catch (const dexcontrol::Error &error) {
         std::cerr << "dexcontrol error (status " << error.status() << "): " << error.what() << "\n";
     } catch (const std::exception &error) {
+        if (interrupted() && std::string(error.what()) == "interrupted") return 0;
         std::cerr << "error: " << error.what() << "\n";
     }
     return 1;

@@ -80,7 +80,7 @@ class Sensors:
     # actually named "ultrasonic". Rust has no such clash: there, methods and
     # sensor names do not share a namespace.
     def get_imu(self, name: str):
-        """Native IMU handle."""
+        """IMU handle for a standalone sensor or an embedded camera/LiDAR IMU."""
         return self._robot._imu(name)
 
     def get_lidar_2d(self, name: str):
@@ -118,11 +118,11 @@ class Sensors:
             raise SensorNotAvailableError(name)
         capabilities = set(self._robot._sensor_info(name)["capabilities"])
         for capability, accessor in (
-            ("imu", self.get_imu),
             ("lidar_2d", self.get_lidar_2d),
             ("lidar_3d", self.get_lidar_3d),
-            ("ultrasonic", self.get_ultrasonic),
             ("camera_stream", self.get_camera),
+            ("imu", self.get_imu),
+            ("ultrasonic", self.get_ultrasonic),
         ):
             if capability in capabilities:
                 return accessor(name)

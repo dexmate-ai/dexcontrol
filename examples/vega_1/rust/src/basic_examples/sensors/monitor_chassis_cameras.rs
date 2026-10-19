@@ -10,9 +10,9 @@
 
 //! Monitor frames from configured chassis cameras.
 //!
-//! Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; poll 200 times at 30 Hz, then unsubscribe. No image files are saved.
+//! Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; monitor at 30 Hz until Ctrl+C by default. --samples N limits the number of polls. Unsubscribe on exit. No image files are saved.
 //!
-//! Prints numeric summaries/frame metadata; does not open a viewer.
+//! Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 //!
 //! Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.
 
@@ -21,8 +21,8 @@ use dexcontrol_examples::{print_camera_frames, Args, Result};
 #[tokio::main]
 async fn main() -> Result {
     let args = Args::parse(
-        "Monitor frames from configured chassis cameras. Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; poll 200 times at 30 Hz, then unsubscribe. No image files are saved. Prints numeric summaries/frame metadata; does not open a viewer. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
-        &["camera", "period", "samples", "stream"],
+        "Monitor frames from configured chassis cameras. Select base_*_camera sensors from the selected configuration unless --camera is supplied. Subscribe to all advertised streams unless --stream selects a subset; monitor at 30 Hz until Ctrl+C by default. --samples N limits the number of polls. Unsubscribe on exit. No image files are saved. Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
+        &["camera", "period", "samples", "stream", "no-display", "viewer-url"],
     );
     let mut cameras = args.list("camera");
     if cameras.is_empty() {
@@ -39,14 +39,20 @@ async fn main() -> Result {
             "no chassis cameras are declared; pass --camera NAME",
         ));
     }
+    let viewer = args.image_viewer()?;
     let robot = args.connect(&cameras).await?;
     dexcontrol_examples::run_robot(&robot, async {
         print_camera_frames(
             &robot,
             &cameras,
             &args.list("stream"),
-            args.integer("samples", 200)?,
+            if args.has("samples") {
+                Some(args.integer("samples", 0)?)
+            } else {
+                None
+            },
             args.duration("period", 1.0 / 30.0)?,
+            viewer.as_ref(),
         )
         .await?;
         Ok(())

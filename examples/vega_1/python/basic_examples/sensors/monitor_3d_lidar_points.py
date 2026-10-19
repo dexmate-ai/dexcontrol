@@ -10,7 +10,7 @@
 
 """Monitor point clouds from one 3D LiDAR.
 
-Enable the front 3D LiDAR, wait up to 10 s for activity, and poll 100 times at 0.1 s intervals. --position back selects the rear LiDAR; no cloud file is saved.
+Enable the front 3D LiDAR, wait up to 10 s for activity, and poll continuously at 0.1 s intervals until Ctrl+C. --samples N limits the number of polls. --position back selects the rear LiDAR; no cloud file is saved.
 
 Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
 
@@ -32,7 +32,9 @@ class Args(ViewerOptions):
     """Command-line options."""
 
     position: Literal["front", "back"] = "front"
-    samples: int = 100
+    samples: Annotated[
+        Optional[int], tyro.conf.arg(help="Poll limit; omitted runs until Ctrl+C")
+    ] = None
     period: float = 0.1
     simulated: Annotated[bool, tyro.conf.arg(help="Use the in-process simulation")] = (
         False
@@ -47,6 +49,8 @@ class Args(ViewerOptions):
 
 def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
+    if args.samples is not None and args.samples < 0:
+        raise ValueError("--samples must be non-negative")
 
     name = f"lidar_3d_{args.position}"
     with Robot(
@@ -61,19 +65,23 @@ def main() -> None:
 
         visualize = start(name, args)
         started = time.monotonic()
-        for index in range(args.samples):
-            points = lidar.get_points()
-            if points is None:
-                continue
-            if visualize:
-                import rerun as rr
+        try:
+            index = 0
+            while args.samples is None or index < args.samples:
+                points = lidar.get_points()
+                if points is not None and len(points):
+                    if visualize:
+                        import rerun as rr
 
-                set_sample_time(index, time.monotonic() - started)
-                rr.log(name, rr.Points3D(points, colors=_height_colors(points)))
-            else:
-                print(f"sample={index + 1} points={len(points)}")
-            if index + 1 < args.samples:
-                time.sleep(args.period)
+                        set_sample_time(index, time.monotonic() - started)
+                        rr.log(name, rr.Points3D(points, colors=_height_colors(points)))
+                    else:
+                        print(f"sample={index + 1} points={len(points)}")
+                index += 1
+                if args.samples is None or index < args.samples:
+                    time.sleep(args.period)
+        except KeyboardInterrupt:
+            pass
 
 
 def _height_colors(points: np.ndarray) -> np.ndarray:

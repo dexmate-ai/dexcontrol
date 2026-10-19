@@ -10,7 +10,7 @@
 
 //! Read and print observations from configured IMUs.
 //!
-//! Read head_imu and chassis_imu once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.
+//! Read IMU streams from head_camera and chassis_imu (when declared) once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval.
 //!
 //! Filters undeclared IMU names before connecting.
 //!
@@ -22,12 +22,12 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result {
     let args = Args::parse(
-        "Read and print observations from configured IMUs. Read head_imu and chassis_imu once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval. Filters undeclared IMU names before connecting. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
+        "Read and print observations from configured IMUs. Read IMU streams from head_camera and chassis_imu (when declared) once by default, waiting up to 5 s for activity. --sensor changes the requested list; optional repeated reads use a 0.1 s interval. Filters undeclared IMU names before connecting. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
         &["period", "samples", "sensor"],
     );
     let mut requested = args.list("sensor");
     if requested.is_empty() {
-        requested = vec!["head_imu".into(), "chassis_imu".into()];
+        requested = vec!["head_camera".into(), "chassis_imu".into()];
     }
     let config = args.resolved_config()?;
     let sensors = requested
@@ -50,9 +50,7 @@ async fn main() -> Result {
     let robot = args.connect(&sensors).await?;
     dexcontrol_examples::run_robot(&robot, async {
     for sensor in &sensors {
-        if !robot.wait_for_state(sensor, Duration::from_secs(5))? {
-            println!("{sensor}: inactive");
-        }
+        dexcontrol_examples::wait_for_imu(&robot, sensor, Duration::from_secs(5)).await?;
     }
     for _ in 0..samples {
         for sensor in &sensors {
