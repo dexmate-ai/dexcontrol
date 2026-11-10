@@ -1,42 +1,31 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
-"""Shared Rerun display helpers; not an executable example.
+"""Optional Rerun display helpers for images, depth and live sensor data.
 
-Imported by sensor/current scripts. start() opens/connects a viewer unless --no-display is set; spawned viewers close when the example exits, including forced termination; missing rerun-sdk falls back to printing. Running this module directly starts no viewer or robot connection."""
+:func:`start` opens or connects a viewer unless ``ViewerOptions.no_display``
+is set; a viewer this module spawned closes when the calling process exits,
+including on forced termination. A missing ``rerun-sdk`` falls back to
+printing, so a script keeps working without it.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
 
-import tyro
-from typing_extensions import Annotated
-
 
 @dataclass
 class ViewerOptions:
     """Display options shared by sensor examples."""
 
-    viewer_url: Annotated[
-        Optional[str],
-        tyro.conf.arg(
-            help="stream to a Rerun viewer at HOST:PORT instead of spawning one (run `rerun` on your laptop, then point this at it)"
-        ),
-    ] = None
-    no_display: Annotated[
-        bool, tyro.conf.arg(help="print values instead of visualizing them")
-    ] = False
+    viewer_url: Optional[str] = None
+    """stream to a Rerun viewer at HOST:PORT instead of spawning one (run `rerun` on your laptop, then point this at it)"""
+    no_display: bool = False
+    """print values instead of visualizing them"""
 
 
-def start(name: str, args: ViewerOptions) -> bool:
+def start(name: str, args: Optional[ViewerOptions] = None) -> bool:
     """Starts a Rerun recording unless the caller asked for plain output.
 
     Returns whether anything should be logged, so an example can branch once
@@ -45,6 +34,7 @@ def start(name: str, args: ViewerOptions) -> bool:
     useful, which matters when the point of running it is to find out whether
     the sensor works at all.
     """
+    args = args or ViewerOptions()
     if args.no_display:
         return False
     try:
@@ -247,7 +237,16 @@ def log_frame(path: str, frame: dict) -> None:
     import rerun as rr
 
     data = frame["data"]
-    if data.ndim == 3:
+    if data.ndim == 3 or data.dtype.kind in "uib":
         rr.log(path, rr.Image(data))
     else:
         rr.log(path, rr.DepthImage(data, meter=1.0))
+
+
+def log_image(path: str, data) -> None:
+    """Log a NumPy image once, or call repeatedly for live display.
+
+    Integer images use image rendering; 2D float arrays are depth in metres.
+    Call start() first and close() when finished. Install rerun-sdk separately.
+    """
+    log_frame(path, {"data": data})

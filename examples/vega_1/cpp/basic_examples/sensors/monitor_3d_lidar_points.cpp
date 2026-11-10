@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Monitor point clouds from one 3D LiDAR.
 //
@@ -32,7 +25,7 @@ int main(int argc, char **argv) {
             throw std::runtime_error(name + " did not become active");
         }
         for (size_t index = 0; !examples::interrupted() && (!samples || index < static_cast<size_t>(*samples)); ++index) {
-            const auto cloud = robot.lidar_3d(name);
+            const auto cloud = robot.sensors().lidar_3d(name);
             std::cout << "sample=" << index + 1 << " points=" << cloud.z.size();
             if (!cloud.z.empty()) {
                 const auto [low, high] = std::minmax_element(cloud.z.begin(), cloud.z.end());

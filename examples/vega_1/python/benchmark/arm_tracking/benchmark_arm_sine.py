@@ -1,12 +1,5 @@
 # Copyright (C) 2025-2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Benchmark each arm joint with a sine trajectory and velocity feed-forward.
 
@@ -181,7 +174,7 @@ def main(args: Args) -> None:
                 joint_vel[joint_idx] = cos_value
 
                 # Lag is what this benchmark measures: the step guard is off.
-                arm.set_joint_pos_vel(joint_pos, joint_vel=joint_vel, max_step=None)
+                arm.set_joint_pos(joint_pos, joint_vel=joint_vel, max_step=None)
                 commands.append(joint_pos.copy())
                 states.append(arm.get_joint_pos().copy())
                 sample_times.append(time.monotonic() - start_time)

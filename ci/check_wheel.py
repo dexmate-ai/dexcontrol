@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 """Public pre-upload gate: allow only compiled wheels and reviewed Python API files."""
 from pathlib import Path
 import base64
@@ -23,9 +16,10 @@ from publication_policy import findings
 from release_version import parse_tag, PYTHON_VERSION_PATTERN
 
 PYTHON_FILES = (
-    "__init__.py", "robot.py", "types.py", "exceptions.py", "_native.pyi", "py.typed",
+    "__init__.py", "robot.py", "diagnostics.py", "viewer.py", "types.py", "exceptions.py", "_native.pyi", "py.typed",
     "py.typed.license", "_logsink.py", "_prompt.py", "_watchdog_process.py",
     "sensors/__init__.py", "sensors/manager.py",
+    "compat/__init__.py", "compat/v05.py",
 )
 
 def validate_public_sbom(data):
@@ -78,7 +72,7 @@ def check(path, version, source_root):
                 raise ValueError("Wheel metadata version does not match release")
             allowed = {"dexcontrol/" + name for name in PYTHON_FILES}
             allowed |= {"dexcontrol/_native.abi3.so"}
-            required_metadata = {"sboms/third-party.cyclonedx.json", "licenses/THIRD-PARTY-NOTICES.txt", "METADATA", "WHEEL", "RECORD", "licenses/LICENSE", "licenses/LICENSE-AGPL", "licenses/LICENSE-HEADER"}
+            required_metadata = {"sboms/third-party.cyclonedx.json", "licenses/THIRD-PARTY-NOTICES.txt", "METADATA", "WHEEL", "RECORD", "licenses/LICENSE", "licenses/NOTICE", "licenses/LICENSE-HEADER"}
             required = allowed | {f"{metadata}/{name}" for name in required_metadata}
             allowed |= {f"{metadata}/{name}" for name in required_metadata | {"sboms/third-party.cyclonedx.json", "licenses/THIRD-PARTY-NOTICES.txt"}}
             found = set()

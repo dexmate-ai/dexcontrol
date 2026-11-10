@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Fold or unfold the robot in ordered, verified stages.
 //!
@@ -54,7 +47,7 @@ async fn stage(
             .join(", "),
         timeout.as_secs_f64()
     );
-    let group = robot.move_to_joint_positions(&targets, MotionOptions::default())?;
+    let group = robot.move_to_joint_pos(&targets, MotionOptions::default())?;
     let wait_result = group.wait(timeout);
     let mut complete = wait_result.is_ok();
     if let Err(error) = &wait_result {

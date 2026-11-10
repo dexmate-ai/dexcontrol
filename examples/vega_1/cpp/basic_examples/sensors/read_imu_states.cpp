@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Read and print observations from configured IMUs.
 //
@@ -58,7 +51,7 @@ int main(int argc, char **argv) {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
             while (true) {
                 try {
-                    (void)robot.imu(name);
+                    (void)robot.sensors().imu(name);
                     break;
                 } catch (const dexcontrol::Error &error) {
                     if (error.status() != DEX_STATE_UNAVAILABLE) throw;
@@ -70,7 +63,7 @@ int main(int argc, char **argv) {
             }
         }
         for (int index = 0; index < samples; ++index) {
-            for (const auto &name : available) print_imu(name, robot.imu(name));
+            for (const auto &name : available) print_imu(name, robot.sensors().imu(name));
             if (index + 1 < samples) examples::sleep_for(period);
         }
     }, {"period", "samples", "sensor"});

@@ -1,12 +1,5 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Custom exceptions for dexcontrol.
 
@@ -96,13 +89,17 @@ class SensorNotAvailableError(ComponentError, AttributeError):
     not enabled in the configuration, or failed to initialize.
     """
 
-    def __init__(self, sensor: str) -> None:
+    def __init__(self, sensor: str, hint: str = "") -> None:
         self.sensor = sensor
-        super().__init__(
+        self.hint = hint
+        message = (
             f"Sensor '{sensor}' is not available or not initialized. "
             f"Use robot.has_sensor('{sensor}') to check availability "
             f"before access."
         )
+        if hint:
+            message = f"{message} {hint}"
+        super().__init__(message)
 
 
 class ModelNotSupportedError(ComponentError):

@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Read and print one arm force-torque observation.
 //
@@ -28,7 +21,7 @@ int main(int argc, char **argv) {
             throw std::runtime_error("wrench state did not become active");
         }
         for (int index = 0; index < samples; ++index) {
-            const auto wrench = robot.wrench(arm);
+            const auto wrench = robot.sensors().wrench(arm);
             std::cout << "force=" << examples::format(std::vector<double>(wrench.values.begin(), wrench.values.begin() + 3))
                       << " N torque=" << examples::format(std::vector<double>(wrench.values.begin() + 3, wrench.values.end()))
                       << " N*m (timestamp " << wrench.timestamp_ns << " ns)\n";

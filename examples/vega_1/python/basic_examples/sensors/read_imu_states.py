@@ -1,12 +1,5 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Read and print observations from configured IMUs.
 
@@ -14,7 +7,7 @@ Read IMU streams from head_camera and chassis_imu (when declared) once by defaul
 
 Filters undeclared IMU names before connecting.
 
-Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
+Uses a read-only DiagnosticClient connection; motors are not initialized. Real hardware is selected unless --simulated is supplied."""
 
 import pprint
 import time
@@ -22,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 import tyro
-from dexcontrol import Robot, robot_config
+from dexcontrol import DiagnosticClient, robot_config
 from typing_extensions import Annotated
 
 
@@ -58,7 +51,7 @@ def main() -> None:
             print(f"{name}: not declared by this profile, skipping")
     if not sensors:
         raise SystemExit("none of the requested IMUs exist in this profile")
-    with Robot(
+    with DiagnosticClient(
         enable_sensors=sensors,
         simulation=args.simulated,
         profile=args.profile,

@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Read, enable, or disable arm force-torque sensor modes.
 //
@@ -27,9 +20,10 @@ int main(int argc, char **argv) {
         auto robot = args.connect();
         for (const auto &name : sides) {
             auto arm = robot.joints(name + "_arm");
-            const auto result = action == "get" ? arm.force_torque_sensor_mode()
+            const auto result = action == "get" ? arm.get_force_torque_sensor_mode()
                                                 : arm.set_force_torque_sensor(action == "enable");
             std::cout << name << "_arm\n" << result << "\n";
         }
-    }, {"side"});
+    }, {"side"},
+       "action: get | enable | disable");
 }

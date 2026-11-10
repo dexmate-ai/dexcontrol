@@ -1,19 +1,12 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 [package]
 name = "dexcontrol-examples"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 rust-version = "1.90"
-license = "AGPL-3.0-only OR LicenseRef-Dexmate-Commercial"
+license = "Apache-2.0"
 publish = false
 autobins = false
 
@@ -39,6 +32,10 @@ path = "src/basic_examples/control/cycle_arm.rs"
 [[bin]]
 name = "control-exercise-chassis"
 path = "src/basic_examples/control/exercise_chassis.rs"
+
+[[bin]]
+name = "control-move-and-turn"
+path = "src/basic_examples/control/move_and_turn.rs"
 
 [[bin]]
 name = "control-cycle-hand"
@@ -123,6 +120,10 @@ path = "src/troubleshooting/clear_component_errors.rs"
 [[bin]]
 name = "troubleshooting-display-robot-info"
 path = "src/troubleshooting/display_robot_info.rs"
+
+[[bin]]
+name = "advanced-hand-guide-arms"
+path = "src/advanced_examples/hand_guide_arms.rs"
 
 [[bin]]
 name = "advanced-steer-chassis-sine"

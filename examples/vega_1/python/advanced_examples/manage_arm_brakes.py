@@ -1,18 +1,11 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Read, release, or engage arm brakes.
 
 Require positional status, release, or engage. status and engage address both arms and every joint unless --side / --joint narrow them. release is never implicit: it requires --side and either --joint (repeatable) or --all, warns that the arm must be supported, and asks for a typed "yes" unless --yes is supplied. This operates the brake service, not the motor-mode service.
 
-Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied; simulated runs skip the confirmation prompt."""
+Uses a Robot control connection with startup arm initialization turned off, so the tool also reaches an arm whose motor cannot enable; shutdown requests a stop. Real hardware is selected unless --simulated is supplied; simulated runs skip the confirmation prompt."""
 
 import pprint
 import sys
@@ -93,7 +86,10 @@ def main() -> None:
     if args.action == "release":
         confirm_release(args, sides)
     with Robot(
-        simulation=args.simulated, profile=args.profile, config_file=args.config
+        simulation=args.simulated,
+        profile=args.profile,
+        config_file=args.config,
+        initialize_arm_modes=False,
     ) as robot:
         for side in sides:
             arm = robot.joints(f"{side}_arm")

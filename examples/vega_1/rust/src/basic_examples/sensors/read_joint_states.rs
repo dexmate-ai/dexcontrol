@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Print current joint states and chassis state.
 //!
@@ -53,7 +46,7 @@ async fn main() -> Result {
             let Ok(joints) = robot.joints(&name) else {
                 continue;
             };
-            let Ok(state) = joints.joint_state(dexcontrol::DurationLimit::Configured) else {
+            let Ok(state) = joints.get_joint_state(dexcontrol::DurationLimit::Configured) else {
                 continue;
             };
             println!(
@@ -91,7 +84,7 @@ async fn main() -> Result {
             match chassis.steering_angle().and_then(|steer| {
                 let count = steer.len();
                 let mut positions = steer;
-                positions.extend(chassis.wheel_position()?);
+                positions.extend(chassis.wheel_encoder_pos()?);
                 Ok((count, positions, chassis.wheel_velocity()?))
             }) {
                 Ok((steer_count, positions, speeds)) => {

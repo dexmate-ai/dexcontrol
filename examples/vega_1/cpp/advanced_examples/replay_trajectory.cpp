@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Prepare robot joint positions and replay a recorded trajectory.
 //
@@ -289,5 +282,6 @@ int main(int argc, char **argv) {
         // Stop and disconnect deliberately: a stop that cannot be delivered
         // is reported here rather than left to the handle's destructor.
         robot.close();
-    }, {"control-hz", "max-goal-diff", "smooth", "speed-factor", "vel-smooth", "velocity-compensation", "visualize"});
+    }, {"control-hz", "max-goal-diff", "smooth", "speed-factor", "vel-smooth", "velocity-compensation", "visualize"},
+       "path: trajectory file to replay");
 }

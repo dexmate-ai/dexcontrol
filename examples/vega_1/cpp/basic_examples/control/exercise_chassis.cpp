@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Drive the chassis in six directions, requesting a stop between them.
 //
@@ -43,14 +36,14 @@ int main(int argc, char **argv) {
                           << std::showpos << std::setprecision(3)
                           << "vx=" << velocity[0] << " m/s, vy=" << velocity[1]
                           << " m/s, wz=" << velocity[2] << " rad/s" << std::noshowpos << std::endl;
-                robot.drive_chassis_for(velocity[0], velocity[1], velocity[2], examples::millis(duration), control_hz);
+                robot.chassis().drive_for(velocity[0], velocity[1], velocity[2], examples::millis(duration), control_hz);
                 std::cout << "      Command stream complete; stop sent." << std::endl;
             }
         } catch (...) {
-            robot.stop_chassis();
+            robot.chassis().stop();
             throw;
         }
-        robot.stop_chassis();
+        robot.chassis().stop();
         // Stop and disconnect deliberately: a stop that cannot be delivered
         // is reported here rather than left to the handle's destructor.
         robot.close();

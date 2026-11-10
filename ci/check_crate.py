@@ -1,12 +1,5 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 """Reject unreviewed source or dependencies in the actual public Cargo archive."""
 from pathlib import Path, PurePosixPath
 import json
@@ -18,7 +11,7 @@ from publication_policy import findings
 
 def check(path, version, source_root=None):
     common = {"Cargo.toml", "Cargo.toml.orig", "Cargo.lock", ".cargo_vcs_info.json",
-              "LICENSE", "LICENSE-AGPL", "LICENSE-HEADER", "src/lib.rs"}
+              "LICENSE", "NOTICE", "LICENSE-HEADER", "src/lib.rs"}
     with tarfile.open(path, "r:gz") as archive:
         members = archive.getmembers()
         if len(members) > 32 or sum(m.size for m in members) > 16 * 1024 * 1024:

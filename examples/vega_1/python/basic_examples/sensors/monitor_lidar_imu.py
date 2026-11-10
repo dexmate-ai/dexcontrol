@@ -1,18 +1,11 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Monitor the IMU associated with a 3D LiDAR.
 
 Enable lidar_3d_front, wait up to 10 s for its IMU stream, and print observations continuously at 0.05 s intervals until Ctrl+C. --samples N limits the number of polls. --sensor selects another sensor with an IMU capability.
 
-Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
+Uses a read-only DiagnosticClient connection; motors are not initialized. Real hardware is selected unless --simulated is supplied."""
 
 import pprint
 import time
@@ -20,7 +13,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import tyro
-from dexcontrol import Robot
+from dexcontrol import DiagnosticClient
 from typing_extensions import Annotated
 
 
@@ -50,7 +43,7 @@ def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
     if args.samples is not None and args.samples < 0:
         raise ValueError("--samples must be non-negative")
-    with Robot(
+    with DiagnosticClient(
         enable_sensors=[args.sensor],
         simulation=args.simulated,
         profile=args.profile,

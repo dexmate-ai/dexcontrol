@@ -1,24 +1,17 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Read, release, or engage arm brakes.
 //!
 //! Require positional status, release, or engage. status and engage address both arms and all their joints unless --side or --joint narrow them. release has no defaults: it requires --side left, right, or both, and either --joint INDEX (repeatable) or --all. Before releasing, warn that the arm must be physically supported, because a released joint can drop under gravity, and require typing yes; --yes skips the prompt and simulated runs do not prompt. This operates the brake service, not the motor-mode service.
 //!
-//! Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.
+//! Uses a Robot control connection with startup arm initialization turned off, so the tool also reaches an arm whose motor cannot enable; shutdown requests a stop. Real hardware is selected unless --simulated is supplied.
 
 use dexcontrol_examples::{component_name, invalid, Args, Result};
 
 #[tokio::main]
 async fn main() -> Result {
-    let args = Args::parse("Read, release, or engage arm brakes. Require positional status, release, or engage. status and engage address both arms and all their joints unless --side or --joint narrow them. release has no defaults: it requires --side left, right, or both, and either --joint INDEX (repeatable) or --all. Before releasing, warn that the arm must be physically supported, because a released joint can drop under gravity, and require typing yes; --yes skips the prompt and simulated runs do not prompt. This operates the brake service, not the motor-mode service. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.", &["all", "joint", "side", "yes"]);
+    let args = Args::parse_with_positionals("Read, release, or engage arm brakes. Require positional status, release, or engage. status and engage address both arms and all their joints unless --side or --joint narrow them. release has no defaults: it requires --side left, right, or both, and either --joint INDEX (repeatable) or --all. Before releasing, warn that the arm must be physically supported, because a released joint can drop under gravity, and require typing yes; --yes skips the prompt and simulated runs do not prompt. This operates the brake service, not the motor-mode service. Uses a Robot control connection with startup arm initialization turned off, so the tool also reaches an arm whose motor cannot enable; shutdown requests a stop. Real hardware is selected unless --simulated is supplied.", &["all", "joint", "side", "yes"], "action: status | release | engage");
     let action = args.positional(0, "");
     if !["status", "release", "engage"].contains(&action.as_str()) {
         return Err(invalid("action must be status, release, or engage"));
@@ -68,12 +61,14 @@ async fn main() -> Result {
              clear before continuing."
         ))?;
     }
-    let robot = args.connect(&[]).await?;
+    let robot = args
+        .connect_with(&[], |options| options.skip_arm_initialization = true)
+        .await?;
     dexcontrol_examples::run_robot(&robot, async {
         for side in sides {
             let arm = robot.joints(&component_name(side, "arm"))?;
             let result = if action == "status" {
-                arm.brake_status()?
+                arm.get_brake_status()?
             } else {
                 match selected {
                     Some(joints) => arm.release_brake(action == "release", joints)?,

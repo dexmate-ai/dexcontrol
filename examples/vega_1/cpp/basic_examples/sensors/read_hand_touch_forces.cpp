@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Read and print fingertip forces from one hand.
 //
@@ -25,7 +18,7 @@ int main(int argc, char **argv) {
         auto robot = args.connect();
         auto hand = robot.joints(args.side() + "_hand");
         for (int index = 0; index < samples; ++index) {
-            const auto forces = hand.touch_forces();
+            const auto forces = hand.get_touch_data();
             std::cout << (forces ? examples::format(*forces) : std::string("no touch sample")) << "\n";
             if (index + 1 < samples) examples::sleep_for(period);
         }

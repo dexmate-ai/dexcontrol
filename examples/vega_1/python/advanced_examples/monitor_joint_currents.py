@@ -1,12 +1,5 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Monitor joint currents for components that report per-joint current.
 
@@ -17,20 +10,15 @@ Starts/connects a Rerun viewer by default; --no-display prints instead. Missing 
 Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
 
 import pprint
-import sys
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import List, Optional
 
 import tyro
 from dexcontrol import DexcontrolError, Robot
 from typing_extensions import Annotated
 
-# The viewer helper lives with the sensor examples; this is the one script
-# outside that directory that visualizes something.
-sys.path.insert(0, str(Path(__file__).parents[1] / "basic_examples" / "sensors"))
-from _viewer import (  # noqa: E402
+from dexcontrol.viewer import (
     ViewerOptions,
     close,
     set_sample_time,

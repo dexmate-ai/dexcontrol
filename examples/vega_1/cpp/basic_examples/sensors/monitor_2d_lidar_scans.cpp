@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Monitor live 2D LiDAR scans.
 //
@@ -32,7 +25,7 @@ int main(int argc, char **argv) {
             throw std::runtime_error(sensor + " did not become active");
         }
         for (size_t index = 0; !examples::interrupted() && (!samples || index < static_cast<size_t>(*samples)); ++index) {
-            const auto scan = robot.lidar_2d(sensor);
+            const auto scan = robot.sensors().lidar_2d(sensor);
             size_t finite = 0;
             double low = INFINITY;
             for (const double range : scan.ranges) {

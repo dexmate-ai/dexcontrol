@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 //! Safe handles for the precompiled DexControl runtime.
 //!
 //! Control algorithms and safety guards execute in the native runtime. Dropping
@@ -37,6 +30,38 @@ use std::{
     ptr::{self, NonNull},
     time::Duration,
 };
+
+/// Stable categories for branching on errors without parsing messages or magic numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ErrorKind {
+    InvalidArgument,
+    Runtime,
+    Timeout,
+    Panic,
+    StaleState,
+    StateUnavailable,
+    ServiceRejected,
+    EStopActive,
+    Stopped,
+    Unknown(i32),
+}
+impl Error {
+    pub fn kind(&self) -> ErrorKind {
+        match self.code {
+            1 => ErrorKind::InvalidArgument,
+            2 => ErrorKind::Runtime,
+            3 => ErrorKind::Timeout,
+            4 => ErrorKind::Panic,
+            5 => ErrorKind::StaleState,
+            6 => ErrorKind::StateUnavailable,
+            7 => ErrorKind::ServiceRejected,
+            8 => ErrorKind::EStopActive,
+            9 => ErrorKind::Stopped,
+            other => ErrorKind::Unknown(other),
+        }
+    }
+}
 
 /// A native error, preserving its status code and actionable diagnostic.
 #[derive(Debug, Clone)]
@@ -168,6 +193,11 @@ pub struct ConnectOptions<'a> {
     pub disable_watchdog: bool,
     pub exit_on_termination: bool,
     pub watchdog_command: Option<&'a str>,
+    /// Connect without putting the arms into position mode. The default
+    /// enables every arm once it is ready, and a required arm whose motor
+    /// cannot enable then fails the connection; set this to clear that
+    /// arm's error, or when the application sets modes itself.
+    pub skip_arm_initialization: bool,
 }
 /// An owning robot connection. Share with `Arc` when using several threads.
 pub struct Robot(NonNull<ffi::dex_robot_t>);
@@ -204,8 +234,12 @@ impl Robot {
             NonNull::new(out).ok_or_else(|| invalid("Runtime returned no component"))?,
         ))
     }
-    pub fn close(&self) -> Result<()> {
+    /// Stops motion and closes the connection; `close` is the same call.
+    pub fn shutdown(&self) -> Result<()> {
         call(|error| unsafe { ffi::dex_robot_close(self.0.as_ptr(), error) })
+    }
+    pub fn close(&self) -> Result<()> {
+        self.shutdown()
     }
     pub fn stop_all(&self) -> Result<()> {
         call(|error| unsafe { ffi::dex_robot_stop_all(self.0.as_ptr(), error) })
@@ -222,6 +256,16 @@ impl Robot {
             ffi::dex_robot_joint_state_json(self.0.as_ptr(), name.as_ptr(), out, error)
         })
     }
+    /// Engages the software E-stop.
+    pub fn estop_activate(&self) -> Result<()> {
+        call(|e| unsafe { ffi::dex_robot_estop_set(self.0.as_ptr(), true, e) })
+    }
+    /// Releases the software E-stop.
+    pub fn estop_deactivate(&self) -> Result<()> {
+        call(|e| unsafe { ffi::dex_robot_estop_set(self.0.as_ptr(), false, e) })
+    }
+    /// Deprecated: use [`Robot::estop_activate`] / [`Robot::estop_deactivate`].
+    #[deprecated(since = "0.8.1", note = "use estop_activate / estop_deactivate")]
     pub fn set_software_estop(&self, enabled: bool) -> Result<()> {
         call(|e| unsafe { ffi::dex_robot_estop_set(self.0.as_ptr(), enabled, e) })
     }
@@ -294,15 +338,17 @@ impl JointComponent {
             )
         })
     }
-    /// Starts a motion; use the returned handle to wait or cancel.
+    /// Starts a tracked move without waiting. On failure the error carries the
+    /// motion handle when the command may have reached the robot; `?` into
+    /// [`Error`] drops it.
     pub fn move_to_joint_pos(
         &self,
         target: &[f64],
         options: MotionOptions,
-    ) -> Result<MotionHandle> {
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
         let options = options.native()?;
         let wait = Wait::NoWait.native()?;
-        MotionHandle::start(|out, error| unsafe {
+        MotionHandle::start_recoverable(|out, error| unsafe {
             ffi::dex_component_move_to_joint_pos_opt(
                 self.0.as_ptr(),
                 target.as_ptr(),
@@ -314,16 +360,28 @@ impl JointComponent {
             )
         })
     }
+    /// Deprecated: [`JointComponent::move_to_joint_pos`] now returns the same
+    /// `MotionStartError`, with the handle when the command may have reached the robot.
+    #[deprecated(since = "0.8.1", note = "use move_to_joint_pos")]
+    pub fn move_to_joint_pos_recoverable(
+        &self,
+        target: &[f64],
+        options: MotionOptions,
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
+        self.move_to_joint_pos(target, options)
+    }
+    /// Starts a tracked move to a named pose without waiting; the error carries
+    /// the handle like [`JointComponent::move_to_joint_pos`].
     pub fn go_to_pose(
         &self,
         pose: &str,
         passthrough: bool,
         options: MotionOptions,
-    ) -> Result<MotionHandle> {
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
         let pose = string(pose)?;
         let options = options.native()?;
         let wait = Wait::NoWait.native()?;
-        MotionHandle::start(|out, error| unsafe {
+        MotionHandle::start_recoverable(|out, error| unsafe {
             ffi::dex_component_go_to_pose_opt(
                 self.0.as_ptr(),
                 pose.as_ptr(),
@@ -334,6 +392,17 @@ impl JointComponent {
                 error,
             )
         })
+    }
+    /// Deprecated: [`JointComponent::go_to_pose`] now returns the same
+    /// `MotionStartError`, with the handle when the command may have reached the robot.
+    #[deprecated(since = "0.8.1", note = "use go_to_pose")]
+    pub fn go_to_pose_recoverable(
+        &self,
+        pose: &str,
+        passthrough: bool,
+        options: MotionOptions,
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
+        self.go_to_pose(pose, passthrough, options)
     }
 }
 impl Drop for JointComponent {
@@ -352,27 +421,43 @@ pub enum MotionState {
     Unknown(u32),
 }
 /// Owns one motion reference. Dropping it does not implicitly cancel a motion.
+#[derive(Debug)]
 pub struct MotionHandle(NonNull<ffi::dex_motion_t>);
 impl MotionHandle {
+    /// Takes ownership of the handle an out-pointer call produced.
     fn start(
         f: impl FnOnce(*mut *mut ffi::dex_motion_t, *mut ffi::dex_error_t) -> i32,
     ) -> Result<Self> {
+        Self::start_recoverable(f).map_err(|failure| failure.error)
+    }
+    fn start_recoverable(
+        f: impl FnOnce(*mut *mut ffi::dex_motion_t, *mut ffi::dex_error_t) -> i32,
+    ) -> std::result::Result<Self, MotionStartError<Self>> {
         let mut out = ptr::null_mut();
         let result = call(|error| f(&mut out, error));
-        // A failed waited command can still return an owning motion reference.
-        if let Err(error) = result {
-            if !out.is_null() {
-                unsafe { ffi::dex_motion_release(out) };
-            }
-            return Err(error);
+        let handle = NonNull::new(out).map(Self);
+        match result {
+            Err(error) => Err(MotionStartError { error, handle }),
+            Ok(()) => handle.ok_or_else(|| invalid("Runtime returned no motion").into()),
         }
-        Ok(Self(
-            NonNull::new(out).ok_or_else(|| invalid("Runtime returned no motion"))?,
-        ))
+    }
+    /// Explicit success wait; same contract as the existing wait method.
+    pub fn wait_success(&self, timeout: Duration) -> Result<()> {
+        self.wait(timeout)
     }
     pub fn wait(&self, timeout: Duration) -> Result<()> {
         let wait = Wait::Timeout(timeout).native()?;
         call(|error| unsafe { ffi::dex_motion_wait_success(self.0.as_ptr(), &wait, error) })
+    }
+    /// Wait for a terminal outcome; cancellation is returned as a state.
+    pub fn wait_terminal(&self, timeout: Duration) -> Result<MotionState> {
+        let wait = Wait::Timeout(timeout).native()?;
+        call(|error| unsafe { ffi::dex_motion_wait(self.0.as_ptr(), &wait, error) })?;
+        self.state()
+    }
+    pub fn cancel_and_wait(&self, timeout: Duration) -> Result<MotionState> {
+        self.cancel()?;
+        self.wait_terminal(timeout)
     }
     pub fn cancel(&self) -> Result<()> {
         call(|error| unsafe { ffi::dex_motion_cancel(self.0.as_ptr(), error) })
@@ -388,6 +473,34 @@ impl Drop for MotionHandle {
         unsafe { ffi::dex_motion_release(self.0.as_ptr()) }
     }
 }
+
+/// A failed submission with an owning recovery handle when publication was ambiguous.
+#[derive(Debug)]
+pub struct MotionStartError<T> {
+    pub error: Error,
+    pub handle: Option<T>,
+}
+impl<T> From<Error> for MotionStartError<T> {
+    fn from(error: Error) -> Self {
+        Self {
+            error,
+            handle: None,
+        }
+    }
+}
+impl<T> std::fmt::Display for MotionStartError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+/// `?` in a function returning [`Result`] drops the handle and keeps the error.
+impl<T> From<MotionStartError<T>> for Error {
+    fn from(failure: MotionStartError<T>) -> Self {
+        failure.error
+    }
+}
+
+impl<T: std::fmt::Debug> std::error::Error for MotionStartError<T> {}
 
 /// Battery readings in volts, amperes, degrees Celsius and percent.
 pub use ffi::dex_battery_t as Battery;
@@ -450,3 +563,31 @@ unsafe impl Send for JointComponent {}
 unsafe impl Sync for JointComponent {}
 unsafe impl Send for MotionHandle {}
 unsafe impl Sync for MotionHandle {}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    #[test]
+    fn failed_ffi_start_retains_non_null_owning_handle() {
+        let robot = Robot::simulated("vega_1").unwrap();
+        let motion = robot
+            .joints("head")
+            .unwrap()
+            .move_to_joint_pos(&[0.0; 3], MotionOptions::default())
+            .unwrap();
+        let failure = MotionHandle::start_recoverable(|out, _| {
+            unsafe {
+                *out = motion.0.as_ptr();
+            }
+            std::mem::forget(motion);
+            ffi::DEX_TIMEOUT
+        })
+        .unwrap_err();
+        assert_eq!(failure.error.kind(), ErrorKind::Timeout);
+        assert_eq!(
+            failure.handle.unwrap().refresh().unwrap(),
+            MotionState::Succeeded
+        );
+        robot.close().unwrap();
+    }
+}

@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Human-readable read-only diagnostics, independent of transport and hardware.
 use serde_json::Value;
@@ -87,6 +80,7 @@ pub fn render(s: &Value) -> String {
             vec!["Transport".into(), "DexComm".into()],
             vec!["Components".into(), join(&s["component_names"], "None")],
             vec!["Sensors".into(), join(&s["sensor_names"], "None enabled")],
+            vec!["End effectors".into(), end_effectors(s)],
         ],
     );
     let components = members(&s["joint_names"])
@@ -354,6 +348,19 @@ fn monitoring(out: &mut String, m: &Value) {
     table(out, "Monitoring", &["Monitor", "Status", "Details"], rows);
 }
 
+/// Vega's bring-up report: the hand each side configures and what the robot
+/// says is there.
+fn end_effectors(snapshot: &Value) -> String {
+    // The core renders the line (same words as the connect log) so a
+    // mismatch names the profile and the variant to select. It quotes the
+    // robot's hand-type reply, so it is scrubbed like every other cell.
+    let summary = &snapshot["model_bringup"]["end_effectors"]["summary"];
+    match summary.as_str() {
+        Some(line) if !line.is_empty() => text(summary),
+        _ => "--".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,6 +388,25 @@ mod tests {
         ] {
             assert!(out.contains(expected), "missing {expected}: {out}");
         }
+    }
+    #[test]
+    fn end_effectors_row_prints_the_line_the_core_rendered() {
+        let line = "both: none, but the robot reports DexGripper (select vega_1_gripper)";
+        let out =
+            render(&json!({"model_bringup":{"end_effectors":{"summary": line, "sides": {}}}}));
+        assert!(out.contains(line), "{out}");
+        // The robot's reply is quoted in the line: control characters are scrubbed.
+        let hostile = json!({"model_bringup":{"end_effectors":{"summary":"left: robot reports \u{1b}[31mX\nY"}}});
+        assert_eq!(end_effectors(&hostile), "left: robot reports  [31mX Y");
+        assert_eq!(end_effectors(&json!({})), "--");
+        assert_eq!(
+            end_effectors(&json!({"model_bringup":{"end_effectors":{"summary":""}}})),
+            "--"
+        );
+        assert_eq!(
+            end_effectors(&json!({"model_bringup":{"end_effectors":{"sides":{}}}})),
+            "--"
+        );
     }
     #[test]
     fn missing_estop_evidence_is_not_reported_clear() {

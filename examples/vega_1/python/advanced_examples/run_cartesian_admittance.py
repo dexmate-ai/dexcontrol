@@ -1,18 +1,11 @@
 # Copyright (C) 2025-2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Run wrench-based Cartesian admittance on both arms until interrupted.
 
 Uses dexmotion inverse kinematics and both arm wrench streams. Default gain is 1.0, zero-force mode is enabled, and no blue-button gate is required unless --need-button is set. Streams direct joint targets until Ctrl-C, then requests shutdown. Uses a real Robot control connection with normal startup side effects; no simulation flag."""
 
-from typing import Literal
+from typing import Literal, Optional
 
 import numpy as np
 import tyro
@@ -153,6 +146,16 @@ def preprocess_wrench(
     return np.concatenate([force, torque])
 
 
+def flat_joint_pos(bot: Robot, components: list[str]) -> dict[str, float]:
+    """Return ``{joint_name: position}`` for the given components.
+
+    ``Robot.get_joint_pos_dict(component=[...])`` nests positions by component
+    (``{"left_arm": {"L_arm_j1": ...}}``); dexmotion wants one flat joint map.
+    """
+    nested = bot.get_joint_pos_dict(component=components)
+    return {joint: pos for joints in nested.values() for joint, pos in joints.items()}
+
+
 def _initialize_robot_and_motion_manager(
     bot: Robot,
 ) -> tuple[MotionManager, LocalPinkIKSolver]:
@@ -167,14 +170,14 @@ def _initialize_robot_and_motion_manager(
     Raises:
         ValueError: If initialization fails.
     """
+    components = ["head", "left_arm", "right_arm"]
     if bot.has_component("torso"):
-        qpos_dict = bot.get_joint_pos_dict(
-            component=["head", "left_arm", "right_arm", "torso"]
-        )
-    else:
-        qpos_dict = bot.get_joint_pos_dict(component=["head", "left_arm", "right_arm"])
+        components.append("torso")
+    qpos_dict = flat_joint_pos(bot, components)
 
+    # Plan on the same robot model the connection resolved (flag or ROBOT_CONFIG).
     motion_manager = MotionManager(
+        robot_type=bot.profile_name,
         init_visualizer=False,
         initial_joint_configuration_dict=qpos_dict,
     )
@@ -279,16 +282,26 @@ def main(
     zero_force: bool = True,
     kd_gain: float = 1.0,
     need_button: bool = False,
+    profile: Optional[str] = None,
 ) -> None:
     """Run wrench-based Cartesian admittance on both arms until interrupted.
 
-    Uses dexmotion inverse kinematics and both arm wrench streams. Default gain is 1.0, zero-force mode is enabled, and no blue-button gate is required unless --need-button is set. Streams direct joint targets until Ctrl-C, then requests shutdown. Uses a real Robot control connection with normal startup side effects; no simulation flag."""
+    Uses dexmotion inverse kinematics and both arm wrench streams. Default gain is 1.0, zero-force mode is enabled, and no blue-button gate is required unless --need-button is set. Streams direct joint targets until Ctrl-C, then requests shutdown. Uses a real Robot control connection with normal startup side effects; no simulation flag.
+
+    Args:
+        zero_force: If True, move only in response to external wrench; if False,
+            also pull back toward the initial pose.
+        kd_gain: Admittance gain; larger is stiffer (clamped to at least 0.3).
+        need_button: If True, an arm moves only while its blue button is pressed.
+        profile: Built-in robot profile (e.g. vega_1p_gripper). Defaults to the
+            ROBOT_CONFIG environment variable. Also used as the dexmotion robot_type.
+    """
     if kd_gain < 0.3:
         logger.warning("kd_gain is too small. Setting to 0.3.")
         kd_gain = 0.3
 
     # Initialize robot and components
-    bot = Robot()
+    bot = Robot(profile=profile)
     arms = {"left": bot.left_arm, "right": bot.right_arm}
     arm_ee_name = {"left": "L_ee", "right": "R_ee"}
 
@@ -344,7 +357,7 @@ def main(
             if activated:
                 # Update motion manager with current joint positions
                 motion_manager.set_joint_pos(
-                    bot.get_joint_pos_dict(component=["left_arm", "right_arm"])
+                    flat_joint_pos(bot, ["left_arm", "right_arm"])
                 )
 
                 # Compute current end-effector poses

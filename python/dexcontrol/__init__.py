@@ -1,12 +1,5 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """DexControl: Robot Control Interface Library.
 
@@ -24,7 +17,7 @@ from pathlib import Path
 # Imported eagerly, on the importing (normally main) thread: the native log
 # bridge resolves ``_logsink.emit`` on its drain thread, and an import cost or
 # failure must not first surface there.
-from dexcontrol import _logsink, _native
+from dexcontrol import _logsink, _native  # noqa: F401 - eager import, see above
 
 # Development checkout checks are excluded from customer wheels.
 import importlib.util as _import_util
@@ -49,8 +42,9 @@ from dexcontrol._native import (
     Battery,
     Chassis,
     ControlContext,
-    DiagnosticClient,
     EStop,
+    Odometry,
+    Pose2d,
     Heartbeat,
     JointComponent,
     MotionHandle,
@@ -83,6 +77,7 @@ from dexcontrol.exceptions import (
     StateTimeoutError,
 )
 from dexcontrol.robot import Robot
+from dexcontrol.diagnostics import DiagnosticClient
 from dexcontrol.types import MotionState
 
 try:
@@ -180,6 +175,8 @@ __all__ = [
     "DexcontrolError",
     "DiagnosticClient",
     "EStop",
+    "Odometry",
+    "Pose2d",
     "EStopActiveError",
     "Heartbeat",
     "JointComponent",

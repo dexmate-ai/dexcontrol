@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Shared scaffolding for the Rust examples.
 
@@ -32,11 +25,47 @@ const FLAGS: &[&str] = &[
     "velocity-compensation",
     "all",
     "yes",
+    "hold-pose",
 ];
+
+/// ANSI colors for `--help`; empty unless stdout is a terminal and `NO_COLOR` is unset.
+struct HelpPalette {
+    bold: &'static str,
+    dim: &'static str,
+    cyan: &'static str,
+    green: &'static str,
+    reset: &'static str,
+}
+
+impl HelpPalette {
+    fn detect() -> Self {
+        use std::io::IsTerminal;
+        let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+        let dumb = std::env::var("TERM").is_ok_and(|t| t == "dumb");
+        if std::io::stdout().is_terminal() && !no_color && !dumb {
+            Self {
+                bold: "\x1b[1m",
+                dim: "\x1b[2m",
+                cyan: "\x1b[36m",
+                green: "\x1b[32m",
+                reset: "\x1b[0m",
+            }
+        } else {
+            Self {
+                bold: "",
+                dim: "",
+                cyan: "",
+                green: "",
+                reset: "",
+            }
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct Args {
     description: &'static str,
+    positional_usage: &'static str,
     options: BTreeMap<String, Vec<String>>,
     positionals: Vec<String>,
 }
@@ -113,8 +142,20 @@ impl Args {
     }
 
     pub fn parse(description: &'static str, task_options: &[&str]) -> Self {
+        Self::parse_with_positionals(description, task_options, "")
+    }
+
+    /// [`Self::parse`] for an example that takes positional arguments;
+    /// `positional_usage` names them for `--help`, e.g.
+    /// `"action: status | activate | deactivate (default: status)"`.
+    pub fn parse_with_positionals(
+        description: &'static str,
+        task_options: &[&str],
+        positional_usage: &'static str,
+    ) -> Self {
         let mut parsed = Self {
             description,
+            positional_usage,
             ..Self::default()
         };
         let mut tokens = std::env::args().skip(1).peekable();
@@ -168,18 +209,50 @@ impl Args {
             }
         }
         if parsed.flag("help") {
-            println!("{}", parsed.description);
+            // One layout for every example, in every language: description,
+            // positional arguments, task options, common options. Colors only
+            // on a terminal, and never with NO_COLOR set.
+            let c = HelpPalette::detect();
+            println!("{}\n", parsed.description);
+            if parsed.positional_usage.is_empty() {
+                println!(
+                    "{}Positional arguments:{} {}(none){}",
+                    c.bold, c.reset, c.dim, c.reset
+                );
+            } else {
+                println!(
+                    "{}Positional arguments:{} {}{}{}",
+                    c.bold, c.reset, c.green, parsed.positional_usage, c.reset
+                );
+            }
+            let listed = task_options
+                .iter()
+                .map(|name| format!("{}--{name}{}", c.cyan, c.reset))
+                .collect::<Vec<_>>()
+                .join(" ");
+            if listed.is_empty() {
+                println!(
+                    "{}Task options:{} {}(none){}",
+                    c.bold, c.reset, c.dim, c.reset
+                );
+            } else {
+                println!("{}Task options:{} {listed}", c.bold, c.reset);
+            }
             println!(
-                "Task options: {}",
-                task_options
-                    .iter()
-                    .map(|name| format!("--{name}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            println!(
-                "\nCommon options: --profile NAME, --config FILE, \
-                 --enable-sensor NAME (repeatable), --simulated"
+                "{}Common options:{} {}--profile{} NAME, {}--config{} FILE, \
+                 {}--enable-sensor{} NAME (repeatable), {}--simulated{}, {}--help{}",
+                c.bold,
+                c.reset,
+                c.cyan,
+                c.reset,
+                c.cyan,
+                c.reset,
+                c.cyan,
+                c.reset,
+                c.cyan,
+                c.reset,
+                c.cyan,
+                c.reset
             );
             std::process::exit(0);
         }
@@ -342,6 +415,17 @@ impl Args {
     pub async fn connect(&self, sensors: &[String]) -> Result<Robot> {
         Ok(Robot::connect(self.options(sensors)?)?)
     }
+    /// Connects like [`Self::connect`] after `adjust` has changed the
+    /// common options, e.g. to skip the startup arm mode change.
+    pub async fn connect_with(
+        &self,
+        sensors: &[String],
+        adjust: impl FnOnce(&mut ConnectOptions<'_>),
+    ) -> Result<Robot> {
+        let mut options = self.options(sensors)?;
+        adjust(&mut options);
+        Ok(Robot::connect(options)?)
+    }
 
     /// Ask before multi-joint benchmarks/replay, before opening a connection.
     pub fn confirm_motion(&self) -> Result {
@@ -402,7 +486,7 @@ pub async fn pause(duration: Duration) {
 pub async fn wait_for_imu(robot: &Robot, sensor: &str, timeout: Duration) -> Result {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        match robot.imu(sensor, None) {
+        match robot.sensors().imu(sensor, None) {
             Ok(_) => return Ok(()),
             // DEX_STATE_UNAVAILABLE from the public C ABI: retry only missing data.
             Err(error) if error.code == 6 => {}
@@ -440,7 +524,7 @@ pub async fn print_camera_frames(
     // Keep subscription setup in the guarded scope so partial setup is cleaned up too.
     let outcome: Result = async {
         for sensor in sensors {
-            let camera = robot.camera(sensor)?;
+            let camera = robot.sensors().camera(sensor)?;
             let streams = if requested_streams.is_empty() {
                 camera.streams()?
             } else {
@@ -460,7 +544,7 @@ pub async fn print_camera_frames(
                 }
             }
             for (sensor, stream) in &subscriptions {
-                if let Some(frame) = robot.camera(sensor)?.latest_frame(stream)? {
+                if let Some(frame) = robot.sensors().camera(sensor)?.latest_frame(stream)? {
                     let info = frame.info()?;
                     if let Some(viewer) = viewer {
                         let path = format!("{sensor}/{stream}");
@@ -491,7 +575,11 @@ pub async fn print_camera_frames(
     .await;
     let mut cleanup_error = None;
     for (sensor, stream) in subscriptions {
-        if let Err(e) = robot.camera(&sensor).and_then(|c| c.unsubscribe(&stream)) {
+        if let Err(e) = robot
+            .sensors()
+            .camera(&sensor)
+            .and_then(|c| c.unsubscribe(&stream))
+        {
             cleanup_error.get_or_insert(e);
         }
     }
@@ -673,6 +761,7 @@ mod cleanup_tests {
             .await
             .unwrap();
         assert!(!robot
+            .sensors()
             .camera("head_camera")
             .unwrap()
             .is_active(None, Duration::from_secs(1))

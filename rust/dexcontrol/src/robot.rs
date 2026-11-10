@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 //! Robot discovery, configuration, maintenance and model-selected chassis control.
 use crate::*;
 impl ConnectOptions<'_> {
@@ -41,6 +34,7 @@ impl ConnectOptions<'_> {
         n.simulated = self.simulated.into();
         n.require_version_check = self.require_version_check.into();
         n.disable_watchdog = self.disable_watchdog.into();
+        n.skip_arm_initialization = self.skip_arm_initialization.into();
         n.exit_on_termination = self.exit_on_termination.into();
         f(&n)
     }
@@ -125,8 +119,14 @@ impl Robot {
     pub fn initialize_components_json(&self) -> Result<String> {
         text(|out, e| unsafe { ffi::dex_robot_initialize_components_json(self.0.as_ptr(), out, e) })
     }
-    pub fn clear_all_errors_json(&self) -> Result<String> {
+    /// Clears every maintenance-capable controller; the per-component report as JSON.
+    pub fn clear_errors_json(&self) -> Result<String> {
         text(|out, e| unsafe { ffi::dex_robot_clear_all_errors_json(self.0.as_ptr(), out, e) })
+    }
+    /// Deprecated alias of [`Robot::clear_errors_json`].
+    #[deprecated(since = "0.8.1", note = "use clear_errors_json")]
+    pub fn clear_all_errors_json(&self) -> Result<String> {
+        self.clear_errors_json()
     }
     pub fn clear_error(&self, name: &str) -> Result<()> {
         let name = string(name)?;
@@ -205,11 +205,44 @@ impl Robot {
             .collect()
     }
     /// None selects the unique enabled mobile base; the runtime rejects ambiguous selection.
+    /// One chassis by name, on multi-base robots; `chassis(None)` selects the
+    /// unique enabled base.
+    pub fn chassis_named(&self, name: &str) -> Result<Chassis<'_>> {
+        self.chassis(Some(name))
+    }
     pub fn chassis(&self, name: Option<&str>) -> Result<Chassis<'_>> {
         Ok(Chassis {
             robot: self,
             name: name.map(string).transpose()?,
         })
+    }
+
+    /// True when the chassis driver contributes a wheel model, so
+    /// [`Robot::odometry`] and the closed-loop `turn_by` / `move_by` work;
+    /// every other chassis operation is unaffected.
+    pub fn supports_odometry(&self) -> Result<bool> {
+        let mut supported = 0u8;
+        call(|e| unsafe { ffi::dex_robot_odometry_supported(self.0.as_ptr(), &mut supported, e) })?;
+        Ok(supported != 0)
+    }
+
+    /// The base's odometry, started with default options on first use
+    /// (heading from an enabled base IMU such as `chassis_imu`, else the
+    /// wheels). Fails where [`Robot::supports_odometry`] is false.
+    pub fn odometry(&self) -> Result<Odometry<'_>> {
+        let odometry = Odometry { robot: self };
+        odometry.status()?;
+        Ok(odometry)
+    }
+
+    /// (Re)starts the odometry with explicit options.
+    pub fn start_odometry(&self, options: OdometryOptions) -> Result<Odometry<'_>> {
+        let yaw_source = options.yaw_source.native()?;
+        let native = options.native()?;
+        call(|e| unsafe {
+            ffi::dex_robot_odometry_start(self.0.as_ptr(), yaw_source.as_ptr(), &native, e)
+        })?;
+        Ok(Odometry { robot: self })
     }
     pub fn torso_pitch(&self) -> Result<f64> {
         let mut v = 0.;
@@ -314,7 +347,138 @@ impl Chassis<'_> {
     pub fn wheel_velocity(&self) -> Result<Vec<f64>> {
         self.values(1)
     }
-    pub fn wheel_position(&self) -> Result<Vec<f64>> {
+    pub fn wheel_encoder_pos(&self) -> Result<Vec<f64>> {
         self.values(2)
+    }
+    /// Deprecated alias of [`Chassis::wheel_encoder_pos`].
+    #[deprecated(since = "0.8.1", note = "use wheel_encoder_pos")]
+    pub fn wheel_position(&self) -> Result<Vec<f64>> {
+        self.wheel_encoder_pos()
+    }
+
+    /// Turns in place by `angle_rad` (counter-clockwise positive), closing
+    /// the loop on [`Robot::odometry`], and returns the angle measured: one
+    /// continuous rotation servoed on the live pose, then a correction pass
+    /// only if the settled error is outside the tolerance. Blocks for the
+    /// motion; the base is stopped on every exit. Fails where
+    /// [`Robot::supports_odometry`] is false.
+    pub fn turn_by(&self, angle_rad: f64, options: ClosedLoopOptions) -> Result<f64> {
+        let options = options.native()?;
+        let mut achieved = 0.0;
+        call(|e| unsafe {
+            ffi::dex_robot_chassis_turn_by_named(
+                self.robot.0.as_ptr(),
+                self.name_ptr(),
+                angle_rad,
+                &options,
+                &mut achieved,
+                e,
+            )
+        })?;
+        Ok(achieved)
+    }
+
+    /// Drives straight by `distance_m` (forward positive), closing the loop
+    /// on [`Robot::odometry`], and returns the distance measured.
+    pub fn move_by(&self, distance_m: f64, options: ClosedLoopOptions) -> Result<f64> {
+        let options = options.native()?;
+        let mut achieved = 0.0;
+        call(|e| unsafe {
+            ffi::dex_robot_chassis_move_by_named(
+                self.robot.0.as_ptr(),
+                self.name_ptr(),
+                distance_m,
+                &options,
+                &mut achieved,
+                e,
+            )
+        })?;
+        Ok(achieved)
+    }
+}
+
+/// A planar pose: metres in the odometry frame (the pose at the last
+/// reset), yaw in radians counter-clockwise and unwrapped.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Pose2d {
+    pub x: f64,
+    pub y: f64,
+    pub yaw: f64,
+}
+
+/// Everything the odometry knows; see the native `OdometryStatus`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OdometryStatus {
+    pub pose: Pose2d,
+    pub wheel_yaw: f64,
+    /// `"wheels"` or the IMU name the heading comes from.
+    pub yaw_source: String,
+    pub samples: u64,
+    pub imu_samples: u64,
+    pub gaps: u64,
+    pub slip_samples: u64,
+    pub gyro_bias: f64,
+    pub stationary: bool,
+    pub running: bool,
+}
+
+/// Dead-reckoned planar pose of the base, borrowing the robot connection:
+/// translation from the wheel encoders through the chassis' forward
+/// kinematics, heading from an enabled base IMU when there is one, else the
+/// wheels. Relative motion only; it drifts without bound.
+pub struct Odometry<'a> {
+    robot: &'a Robot,
+}
+
+impl Odometry<'_> {
+    pub fn pose(&self) -> Result<Pose2d> {
+        let mut pose = ffi::dex_pose2d_t {
+            struct_size: std::mem::size_of::<ffi::dex_pose2d_t>() as u32,
+            ..Default::default()
+        };
+        call(|e| unsafe { ffi::dex_robot_odometry_pose(self.robot.0.as_ptr(), &mut pose, e) })?;
+        Ok(Pose2d {
+            x: pose.x,
+            y: pose.y,
+            yaw: pose.yaw,
+        })
+    }
+
+    /// Moves the origin to the current pose; calibration is kept.
+    pub fn reset(&self) -> Result<()> {
+        call(|e| unsafe { ffi::dex_robot_odometry_reset(self.robot.0.as_ptr(), e) })
+    }
+
+    pub fn status(&self) -> Result<OdometryStatus> {
+        let mut status = ffi::dex_odometry_status_t {
+            struct_size: std::mem::size_of::<ffi::dex_odometry_status_t>() as u32,
+            ..Default::default()
+        };
+        call(|e| unsafe { ffi::dex_robot_odometry_status(self.robot.0.as_ptr(), &mut status, e) })?;
+        let yaw_source = unsafe { std::ffi::CStr::from_ptr(status.yaw_source.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
+        Ok(OdometryStatus {
+            pose: Pose2d {
+                x: status.x,
+                y: status.y,
+                yaw: status.yaw,
+            },
+            wheel_yaw: status.wheel_yaw,
+            yaw_source,
+            samples: status.samples,
+            imu_samples: status.imu_samples,
+            gaps: status.gaps,
+            slip_samples: status.slip_samples,
+            gyro_bias: status.gyro_bias,
+            stationary: status.stationary != 0,
+            running: status.running != 0,
+        })
+    }
+
+    /// Ends the sampling task; the pose is kept. The next read starts a
+    /// fresh one.
+    pub fn stop(&self) -> Result<()> {
+        call(|e| unsafe { ffi::dex_robot_odometry_stop(self.robot.0.as_ptr(), e) })
     }
 }

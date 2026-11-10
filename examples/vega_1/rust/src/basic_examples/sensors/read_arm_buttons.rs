@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Read and print arm wrist-button states.
 //!
@@ -28,7 +21,7 @@ async fn main() -> Result {
     dexcontrol_examples::run_robot(&robot, async {
         let arm = robot.joints(&component_name(args.side()?, "arm"))?;
         for _ in 0..samples {
-            match arm.button_state() {
+            match arm.get_button_state() {
                 Ok(Some((blue, green))) => println!(
                     "blue={} green={}",
                     if blue { "pressed" } else { "released" },

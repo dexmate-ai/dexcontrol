@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Prepare robot joint positions and replay a recorded trajectory.
 //!
@@ -102,10 +95,9 @@ fn load_csv(text: &str) -> Result<(f64, Trajectory)> {
 
 #[tokio::main]
 async fn main() -> Result {
-    let args = Args::parse(
+    let args = Args::parse_with_positionals(
         "Prepare robot joint positions and replay a recorded trajectory. Require a trajectory file and confirmation before motion. Move to preparation/start targets, then stream recorded joint positions with the configured tracking-error guard. Preparation motions and processing options differ by language; see the language notes. CSV input. Confirm unless --no-confirm (simulation bypasses the prompt); move directly to the recorded first row, then stream. Does not fold/crouch/close hands or smooth/resample/add velocity feed-forward. Rate from file or 500 Hz. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
-        &["control-hz", "max-goal-diff", "no-confirm", "timeout"],
-    );
+        &["control-hz", "max-goal-diff", "no-confirm", "timeout"], "path: trajectory file to replay");
     let path = args.positional(0, "");
     if path.is_empty() {
         return Err(invalid("a trajectory CSV file is required"));
@@ -134,7 +126,7 @@ async fn main() -> Result {
             .iter()
             .map(|(part, rows)| (part.clone(), rows[0].clone()))
             .collect::<BTreeMap<_, _>>();
-        let group = robot.move_to_joint_positions(&starts, MotionOptions::default())?;
+        let group = robot.move_to_joint_pos(&starts, MotionOptions::default())?;
         group.wait(args.duration("timeout", 3.0)?)?;
         let tracks = available
             .into_iter()

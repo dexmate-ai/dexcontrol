@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Benchmark each arm joint with a sine trajectory and velocity feed-forward.
 //
@@ -72,7 +65,7 @@ int main(int argc, char **argv) {
                 std::vector<double> velocity(NUM_JOINTS, 0.0);
                 velocity[joint] = amplitude * omega * std::cos(omega * t);
 
-                arm.set_joint_pos_vel(position, velocity, stream);
+                arm.set_joint_pos(position, velocity, stream);
                 samples.push_back({t, position, arm.get_joint_pos()});
                 limiter.sleep();
             if (examples::interrupted()) throw std::runtime_error("interrupted");

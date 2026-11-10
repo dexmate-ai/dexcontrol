@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 #pragma once
 
@@ -40,6 +33,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 namespace examples {
 
@@ -61,21 +57,43 @@ inline bool interrupted() { return detail::interrupt_flag != 0; }
  * a swallowed argument. The flags every example uses are registered below;
  * an example with a new one calls `Args::declare_flag` before constructing
  * `Args`. */
+/* ANSI colors for --help, empty unless stdout is a terminal and NO_COLOR is unset. */
+struct HelpPalette {
+    const char *bold = "";
+    const char *dim = "";
+    const char *cyan = "";
+    const char *green = "";
+    const char *reset = "";
+};
+inline HelpPalette help_palette() {
+    HelpPalette palette;
+#if !defined(_WIN32)
+    const char *no_color = std::getenv("NO_COLOR");
+    const char *term = std::getenv("TERM");
+    const bool dumb = term != nullptr && std::string(term) == "dumb";
+    if (isatty(STDOUT_FILENO) && (no_color == nullptr || *no_color == '\0') && !dumb) {
+        palette = HelpPalette{"\033[1m", "\033[2m", "\033[36m", "\033[32m", "\033[0m"};
+    }
+#endif
+    return palette;
+}
+
 class Args {
 public:
     static std::set<std::string> &boolean_flags() {
         static std::set<std::string> flags{
             "help",          "simulated",       "unfold",          "visualize",
             "no-confirm",    "no-zero-force", "no-display",   "passthrough", "relative",
-            "velocity-compensation", "all",     "yes",
+            "velocity-compensation", "all",     "yes",           "hold-pose",
         };
         return flags;
     }
     static void declare_flag(const std::string &name) { boolean_flags().insert(name); }
 
     Args(int argc, char **argv, std::string description,
-         std::initializer_list<const char *> task_options = {})
-        : description_(std::move(description)) {
+         std::initializer_list<const char *> task_options,
+         std::string positional_usage = {})
+        : description_(std::move(description)), positional_usage_(std::move(positional_usage)) {
         for (int index = 1; index < argc; ++index) {
             std::string token = argv[index];
             if (token.rfind("--", 0) != 0 || token.size() == 2) {
@@ -109,13 +127,26 @@ public:
             }
         }
         if (flag("help")) {
-            std::cout << description_ << "\n\n"
-                      << "Common options: --profile NAME, --config FILE, "
-                         "--enable-sensor NAME (repeatable), --simulated.\n"
-                         "Example-specific options are listed in the source file.\n";
-            std::cout << "Task options:";
-            for (const auto *name : task_options) std::cout << " --" << name;
-            std::cout << "\n";
+            // One layout for every example, in every language: description,
+            // positional arguments, task options, common options. Colors only
+            // on a terminal, and never with NO_COLOR set.
+            const auto c = help_palette();
+            std::cout << description_ << "\n\n";
+            std::cout << c.bold << "Positional arguments:" << c.reset << " ";
+            if (positional_usage_.empty()) {
+                std::cout << c.dim << "(none)" << c.reset;
+            } else {
+                std::cout << c.green << positional_usage_ << c.reset;
+            }
+            std::cout << "\n" << c.bold << "Task options:" << c.reset;
+            if (task_options.size() == 0) std::cout << " " << c.dim << "(none)" << c.reset;
+            for (const auto *name : task_options) std::cout << " " << c.cyan << "--" << name << c.reset;
+            std::cout << "\n" << c.bold << "Common options:" << c.reset << " "
+                      << c.cyan << "--profile" << c.reset << " NAME, "
+                      << c.cyan << "--config" << c.reset << " FILE, "
+                      << c.cyan << "--enable-sensor" << c.reset << " NAME (repeatable), "
+                      << c.cyan << "--simulated" << c.reset << ", "
+                      << c.cyan << "--help" << c.reset << "\n";
             std::exit(0);
         }
     }
@@ -217,7 +248,11 @@ public:
         options.enable_sensors.insert(options.enable_sensors.end(), sensors.begin(), sensors.end());
         return dexcontrol::Robot::connect(options);
     }
+    /* Read-only diagnostics describe a robot; a simulated one has nothing to
+     * report, so the diagnostic-only tools reject `--simulated` like the
+     * Python versions, which do not offer the flag at all. */
     dexcontrol::DiagnosticClient diagnostics() const {
+        if (flag("simulated")) fail("DiagnosticClient does not support simulation");
         return dexcontrol::DiagnosticClient::connect(connect_options());
     }
 
@@ -240,17 +275,21 @@ private:
         fail(what + " must be one of: " + choices + " (got '" + value + "')");
     }
     std::string description_;
+    std::string positional_usage_;
     std::vector<std::pair<std::string, std::string>> options_;
     std::vector<std::string> positionals_;
 };
 
 /* Runs an example body, mapping thrown errors to a non-zero exit status. */
+/* positional_usage names the positional arguments for --help, e.g.
+ * "action: status | activate | deactivate (default: status)". */
 inline int run(int argc, char **argv, const std::string &description,
                const std::function<void(const Args &)> &body,
-               std::initializer_list<const char *> task_options = {}) {
+               std::initializer_list<const char *> task_options = {},
+               const std::string &positional_usage = {}) {
     std::signal(SIGINT, detail::on_interrupt);
     try {
-        const Args args(argc, argv, description, task_options);
+        const Args args(argc, argv, description, task_options, positional_usage);
         body(args);
         return 0;
     } catch (const dexcontrol::Error &error) {

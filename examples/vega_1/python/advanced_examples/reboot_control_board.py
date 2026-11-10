@@ -1,18 +1,11 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Request a reboot of one robot control board.
 
 Require positional arm, torso, or chassis. The arm board controls both arms. Send the request and exit; do not wait for the board to come back online.
 
-Rebooting a board drops its joints out of control while it restarts, so the script asks for a typed "yes" first unless --yes is supplied. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied; simulated runs skip the confirmation prompt."""
+Rebooting a board drops its joints out of control while it restarts, so the script asks for a typed "yes" first unless --yes is supplied. Uses a Robot control connection with startup arm initialization turned off, so the tool also reaches an arm whose motor cannot enable; shutdown requests a stop. Real hardware is selected unless --simulated is supplied; simulated runs skip the confirmation prompt."""
 
 import sys
 from dataclasses import dataclass
@@ -60,7 +53,10 @@ def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
     confirm_reboot(args)
     with Robot(
-        simulation=args.simulated, profile=args.profile, config_file=args.config
+        simulation=args.simulated,
+        profile=args.profile,
+        config_file=args.config,
+        initialize_arm_modes=False,
     ) as robot:
         robot.reboot_component(args.board)
         # Fire-and-forget: the board stops answering while it restarts, so a

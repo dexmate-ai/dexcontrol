@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 #ifndef DEXCONTROL_H
 #define DEXCONTROL_H
@@ -419,7 +412,7 @@ void dex_buffer_free(dex_buffer_t *buffer);
 /* ---- Robot: introspection ------------------------------------------- */
 /* How to build a robot or diagnostic client. Zero with
  * dex_robot_options_init(), then set what you need. A null profile resolves
- * the profile from the environment (DEXBOT_PROFILE, then ROBOT_NAME, then
+ * the profile from the environment (ROBOT_CONFIG, then ROBOT_NAME, then
  * vega_1 when neither is set); a ROBOT_NAME that names no known robot is an
  * error, never a guess. config_file_utf8 wins over the profile when both are
  * set. */
@@ -446,6 +439,13 @@ typedef struct dex_robot_options_t {
     uint8_t disable_watchdog;
     uint8_t exit_on_termination;
     const char *watchdog_command_utf8;
+    /* Non-zero: connect without putting the arms into position mode. The
+     * default enables every arm once it is ready, and a required arm whose
+     * motor cannot enable then fails the connection; a troubleshooting tool
+     * (clearing that arm's error) or an application that sets modes itself
+     * connects with this set. Everything else starts as usual. Added within
+     * ABI 5: callers announcing the shorter struct_size get the default. */
+    uint8_t skip_arm_initialization;
 } dex_robot_options_t;
 
 DEX_NODISCARD dex_status_t dex_robot_options_init(dex_robot_options_t *options);
@@ -458,7 +458,7 @@ DEX_NODISCARD dex_status_t dex_robot_create(const dex_robot_options_t *options,
 DEX_NODISCARD dex_status_t dex_context_connect(const dex_context_t *context,
                                  const dex_robot_options_t *options,
                                  dex_robot_t **out_robot, dex_error_t *error);
-/* `simulated` is rejected: diagnostics are production-only. */
+/* Read-only diagnostic client; `simulated` selects the in-process mock. */
 DEX_NODISCARD dex_status_t dex_diagnostic_create(const dex_robot_options_t *options,
                                    dex_diagnostic_t **out_client,
                                    dex_error_t *error);
@@ -493,6 +493,12 @@ DEX_NODISCARD dex_status_t dex_robot_sensor_name(dex_robot_t *robot, size_t inde
                                    char **out_name, dex_error_t *error);
 /* Waits until every state stream of a component or sensor delivered a
  * sample; *out_ready is false on timeout. */
+/* Component liveness: the state stream has a sample within the configured
+ * freshness limit. The wait reports a timeout through *out_active, not as
+ * an error. Added within ABI 5. */
+DEX_NODISCARD dex_status_t dex_component_is_active(const dex_component_t *component, bool *out_active);
+DEX_NODISCARD dex_status_t dex_component_wait_for_active(const dex_component_t *component, uint64_t timeout_ms,
+                                                       bool *out_active, dex_error_t *error);
 DEX_NODISCARD dex_status_t dex_robot_wait_for_state(dex_robot_t *robot, const char *name_utf8,
                                       uint64_t timeout_ms, bool *out_ready,
                                       dex_error_t *error);
@@ -542,6 +548,13 @@ DEX_NODISCARD dex_status_t dex_robot_set_joint_pos_multi(dex_robot_t *robot,
                                            dex_error_t *error);
 /* options may be null. The group must be released with
  * dex_motion_group_release(). */
+/* Streamed-goal fan-out; see dex_component_stream_joint_pos. */
+DEX_NODISCARD dex_status_t dex_robot_stream_joint_pos_multi(dex_robot_t *robot,
+    const char *const *names, const double *const *values, const size_t *counts, size_t n,
+    const dex_motion_options_t *options, dex_error_t *error);
+/* On partial delivery failure, out_group may be non-null and owns the
+ * recovery group. Inspect/release it even when the returned status is not OK.
+ * For the full per-component report use dex_robot_start_joint_motions_opt. */
 DEX_NODISCARD dex_status_t dex_robot_move_to_joint_pos_multi(dex_robot_t *robot,
                                                const char *const *names,
                                                const double *const *values,
@@ -642,6 +655,7 @@ DEX_NODISCARD dex_status_t dex_profile_for_robot_name(const char *robot_name_utf
 DEX_NODISCARD dex_status_t dex_diagnostic_query_ntp_json(dex_diagnostic_t *client, size_t sample_count,
                                            char **out_json, dex_error_t *error);
 
+
 /* ---- Robot: E-stop, battery, mobile base ----------------------------- */
 typedef struct dex_estop_status_t {
     uint32_t struct_size;
@@ -727,6 +741,81 @@ DEX_NODISCARD dex_status_t dex_robot_chassis_set_velocity_opt_named(dex_robot_t 
                                                 double wz, const dex_chassis_options_t *options,
                                                 dex_error_t *error);
 
+/* ---- Odometry and closed-loop base motions (ABI 5, additive) ----------
+ * Optional per robot model: dex_robot_odometry_supported reports whether the
+ * chassis driver contributes a wheel model. Translation comes from the wheel
+ * encoders through the chassis' forward kinematics, heading from an enabled
+ * base-mounted IMU ("chassis_imu") when there is one, else from the wheels.
+ * The pose is dead reckoning relative to the last reset: for turn-by and
+ * move-by, not for localisation. */
+typedef struct dex_odometry_options_t {
+    uint32_t struct_size;
+    double sample_hz;          /* integration rate; 0 selects the default (100) */
+    double encoder_scale[2];   /* metres per encoder unit, left then right; 0 selects 1 */
+    double max_sample_travel;  /* m; an encoder jump above it is a state gap (default 0.5) */
+    double slip_rate_threshold; /* rad/s wheel-vs-gyro disagreement counted as slip (default 0.3) */
+} dex_odometry_options_t;
+void dex_odometry_options_init(dex_odometry_options_t *options);
+typedef struct dex_pose2d_t {
+    uint32_t struct_size;
+    double x;   /* m */
+    double y;   /* m */
+    double yaw; /* rad, counter-clockwise, unwrapped */
+} dex_pose2d_t;
+typedef struct dex_odometry_status_t {
+    uint32_t struct_size;
+    double x;
+    double y;
+    double yaw;
+    double wheel_yaw;     /* heading from the wheels alone, for comparison */
+    double gyro_bias;     /* rad/s, 0 without an IMU */
+    uint64_t samples;     /* integrated wheel samples */
+    uint64_t imu_samples; /* distinct IMU samples integrated */
+    uint64_t gaps;        /* samples dropped by the encoder gap guard */
+    uint64_t slip_samples;
+    uint8_t stationary;
+    uint8_t running;      /* at least one sample integrated */
+    char yaw_source[64];  /* "wheels" or the IMU name, NUL-terminated */
+} dex_odometry_status_t;
+/* Options of the closed-loop motions; 0 selects each default: cruise speed
+ * 0.5 rad/s or 0.2 m/s, tolerance 2 deg or 2 cm, 3 passes, 60 s timeout,
+ * 300 ms settle. */
+typedef struct dex_closed_loop_options_t {
+    uint32_t struct_size;
+    double speed;     /* cruise rate: rad/s for a turn, m/s for a move */
+    double tolerance; /* rad for a turn, m for a move */
+    uint32_t max_steps; /* passes: the motion plus correction passes */
+    uint64_t timeout_ms;
+    uint64_t settle_ms;
+} dex_closed_loop_options_t;
+void dex_closed_loop_options_init(dex_closed_loop_options_t *options);
+DEX_NODISCARD dex_status_t dex_robot_odometry_supported(dex_robot_t *robot, uint8_t *out, dex_error_t *error);
+/* yaw_source_utf8: null or "" for automatic, "wheels", or an enabled IMU's
+ * name. options may be null. Not required: the first pose read starts the
+ * odometry with defaults. */
+DEX_NODISCARD dex_status_t dex_robot_odometry_start(dex_robot_t *robot, const char *yaw_source_utf8,
+                                      const dex_odometry_options_t *options, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_robot_odometry_stop(dex_robot_t *robot, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_robot_odometry_pose(dex_robot_t *robot, dex_pose2d_t *out, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_robot_odometry_reset(dex_robot_t *robot, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_robot_odometry_status(dex_robot_t *robot, dex_odometry_status_t *out, dex_error_t *error);
+/* Blocking: one continuous motion servoed on the odometry (the speed follows
+ * the remaining amount down to a floor), then a correction pass only if the
+ * settled error is outside the tolerance. Writes the amount measured. The
+ * base is stopped on every exit. */
+DEX_NODISCARD dex_status_t dex_robot_chassis_turn_by(dex_robot_t *robot, double angle_rad,
+                                       const dex_closed_loop_options_t *options, double *out_achieved,
+                                       dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_robot_chassis_move_by(dex_robot_t *robot, double distance_m,
+                                       const dex_closed_loop_options_t *options, double *out_achieved,
+                                       dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_robot_chassis_turn_by_named(dex_robot_t *robot, const char *name_utf8, double angle_rad,
+                                             const dex_closed_loop_options_t *options, double *out_achieved,
+                                             dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_robot_chassis_move_by_named(dex_robot_t *robot, const char *name_utf8, double distance_m,
+                                             const dex_closed_loop_options_t *options, double *out_achieved,
+                                             dex_error_t *error);
+
 /* ---- Component: introspection and state ------------------------------ */
 DEX_NODISCARD dex_status_t dex_component_name(const dex_component_t *component, char **out_name, dex_error_t *error);
 DEX_NODISCARD dex_status_t dex_component_joint_name(const dex_component_t *component, size_t index,
@@ -799,6 +888,16 @@ DEX_NODISCARD dex_status_t dex_component_move_to_joint_pos_opt(const dex_compone
                                                  const dex_motion_options_t *options,
                                                  const dex_wait_policy_t *wait,
                                                  dex_motion_t **out_motion, dex_error_t *error);
+/* Streams an untracked goal to the motion plugin (motion_id 0): call it from
+ * a control loop, once per tick. The plugin smooths towards the newest goal
+ * within its own velocity/acceleration/jerk bounds, so no step guard
+ * applies and nothing is returned to wait on. DEX_INVALID_ARGUMENT while a
+ * tracked motion of the component is still running. options may be null;
+ * wait_ceiling_ms is ignored. */
+DEX_NODISCARD dex_status_t dex_component_stream_joint_pos(const dex_component_t *component,
+                                                          const double *values, size_t count,
+                                                          const dex_motion_options_t *options,
+                                                          dex_error_t *error);
 DEX_NODISCARD dex_status_t dex_component_go_to_pose(const dex_component_t *component, const char *pose_utf8,
                                       const dex_motion_options_t *options,
                                       const dex_wait_policy_t *wait, dex_motion_t **out_motion,
@@ -1022,6 +1121,11 @@ typedef struct dex_stream_stats_t {
     uint32_t struct_size;
     uint64_t frames_received, frames_replaced_unread, decode_errors;
 } dex_stream_stats_t;
+/* Camera information JSON; no image subscription required. timeout_ms > 0.
+ * Fields depend on the device/server; release *out_json with dex_string_free. */
+DEX_NODISCARD dex_status_t dex_robot_camera_info_json(dex_robot_t *robot, const char *sensor_utf8,
+                                                     uint64_t timeout_ms, char **out_json,
+                                                     dex_error_t *error);
 DEX_NODISCARD dex_status_t dex_robot_camera_stream_count(dex_robot_t *robot, const char *sensor_utf8,
                                            size_t *out_count, dex_error_t *error);
 DEX_NODISCARD dex_status_t dex_robot_camera_stream_name(dex_robot_t *robot, const char *sensor_utf8, size_t index,
@@ -1046,6 +1150,51 @@ DEX_NODISCARD dex_status_t dex_frame_info(const dex_frame_t *frame, dex_frame_in
 /* Borrowed pixels, valid until dex_frame_release(); never copied. */
 DEX_NODISCARD dex_status_t dex_frame_data(const dex_frame_t *frame, const uint8_t **out_data, size_t *out_len);
 void dex_frame_release(dex_frame_t *frame);
+
+/* ---- Diagnostic client: typed sensor reads ----------------------------
+ * The dex_robot_* sensor reads below, on the read-only client. Same
+ * arguments, same outputs, same freshness semantics; added within ABI 5. */
+DEX_NODISCARD dex_status_t dex_diagnostic_battery_ex(dex_diagnostic_t *client, uint64_t max_age_ms,
+                                       dex_battery_t *out, uint64_t *out_age_ms, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_imu_ex(dex_diagnostic_t *client, const char *name_utf8,
+                                   uint64_t max_age_ms, dex_imu_t *out, uint64_t *out_age_ms,
+                                   dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_ultrasonic_ex(dex_diagnostic_t *client, const char *name_utf8,
+                                          uint64_t max_age_ms, dex_ultrasonic_t *out,
+                                          uint64_t *out_age_ms, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_lidar_2d_take(dex_diagnostic_t *client, const char *name_utf8,
+                                          uint64_t max_age_ms, dex_lidar_2d_t **out_scan,
+                                          dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_lidar_3d_take(dex_diagnostic_t *client, const char *name_utf8,
+                                          uint64_t max_age_ms, dex_lidar_3d_t **out_cloud,
+                                          dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_wrench_ex(dex_diagnostic_t *client, const char *component_utf8,
+                                      uint64_t max_age_ms, double out_wrench[6],
+                                      uint64_t *out_timestamp_ns, uint64_t *out_age_ms,
+                                      dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_temperature_json(dex_diagnostic_t *client, const char *component_utf8,
+                                             char **out_json, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_sensor_json(dex_diagnostic_t *client, const char *name_utf8,
+                                        const char *role_utf8, char **out_json, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_camera_info_json(dex_diagnostic_t *client, const char *sensor_utf8,
+                                             uint64_t timeout_ms, char **out_json, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_camera_stream_count(dex_diagnostic_t *client, const char *sensor_utf8,
+                                                size_t *out_count, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_camera_stream_name(dex_diagnostic_t *client, const char *sensor_utf8,
+                                               size_t index, char **out_name, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_camera_subscribe(dex_diagnostic_t *client, const char *sensor_utf8,
+                                             const char *stream_utf8, size_t history, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_camera_unsubscribe(dex_diagnostic_t *client, const char *sensor_utf8,
+                                               const char *stream_utf8, dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_camera_latest_frame(dex_diagnostic_t *client, const char *sensor_utf8,
+                                                const char *stream_utf8, dex_frame_t **out_frame,
+                                                dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_camera_stats(dex_diagnostic_t *client, const char *sensor_utf8,
+                                         const char *stream_utf8, dex_stream_stats_t *out,
+                                         dex_error_t *error);
+DEX_NODISCARD dex_status_t dex_diagnostic_camera_is_active(dex_diagnostic_t *client, const char *sensor_utf8,
+                                             const char *stream_utf8, uint64_t window_ms,
+                                             bool *out_active, dex_error_t *error);
 
 /* ---- Motion groups and motion extras --------------------------------- */
 DEX_NODISCARD dex_status_t dex_motion_group_len(const dex_motion_group_t *group, size_t *out_len);

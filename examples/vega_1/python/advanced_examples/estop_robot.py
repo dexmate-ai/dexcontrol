@@ -1,18 +1,11 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Read, activate, or deactivate the software E-stop.
 
 Default positional action is status. activate requests software E-stop; deactivate clears it. Print the resulting observed status.
 
-Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
+Uses a Robot control connection with startup arm initialization turned off, so the tool also reaches an arm whose motor cannot enable; shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
 
 from dataclasses import dataclass
 from typing import Literal, Optional
@@ -44,7 +37,9 @@ def print_status(status: dict) -> None:
     """Show observed E-stop sources without implying missing feedback is a sample."""
     print(f"E-stop:         {'ACTIVE' if status['engaged'] else 'Not active'}")
     print(f"Active sources: {', '.join(status['active_sources']) or 'None'}")
-    print(f"Feedback:       {'Received' if status['state_observed'] else 'No event received (event-driven E-stop)'}")
+    print(
+        f"Feedback:       {'Received' if status['state_observed'] else 'No event received (event-driven E-stop)'}"
+    )
     if status["engaged"]:
         print("Robot writes are blocked. Read operations remain available.")
         if any(source != "software" for source in status["active_sources"]):
@@ -56,7 +51,10 @@ def print_status(status: dict) -> None:
 def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
     with Robot(
-        simulation=args.simulated, profile=args.profile, config_file=args.config
+        simulation=args.simulated,
+        profile=args.profile,
+        config_file=args.config,
+        initialize_arm_modes=False,
     ) as robot:
         if args.action == "activate":
             robot.estop.activate()

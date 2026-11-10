@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 //! Sensor snapshots own their native storage; borrowed channels cannot outlive them.
 use crate::*;
 pub use ffi::{
@@ -24,9 +17,102 @@ pub struct Wrench {
     pub values: [f64; 6],
     pub timestamp_ns: u64,
 }
+/// Where a sensor read comes from: a control connection or the read-only
+/// diagnostic client. Both expose the same [`Sensors`] view.
+#[derive(Clone, Copy)]
+pub(crate) enum SensorSource<'a> {
+    Robot(&'a Robot),
+    Diagnostic(&'a DiagnosticClient),
+}
+/// The native handle a sensor read dispatches on.
+pub(crate) enum Handle {
+    Robot(*mut ffi::dex_robot_t),
+    Diagnostic(*mut ffi::dex_diagnostic_t),
+}
+impl SensorSource<'_> {
+    pub(crate) fn call(&self, read: impl FnOnce(Handle) -> i32) -> i32 {
+        match self {
+            Self::Robot(robot) => read(Handle::Robot(robot.0.as_ptr())),
+            Self::Diagnostic(client) => read(Handle::Diagnostic(client.0.as_ptr())),
+        }
+    }
+}
+/// The typed sensors of a [`Robot`] or a [`DiagnosticClient`]:
+/// `robot.sensors().imu("head_camera", None)`. Sensors are keyed by sensor
+/// name (cameras, IMUs, lidars, ultrasonics) or by the component they are
+/// mounted on (wrench, temperatures). A view borrowing the connection.
+#[derive(Clone, Copy)]
+pub struct Sensors<'a> {
+    source: SensorSource<'a>,
+}
 impl Robot {
-    /// None accepts any sample age. Some requires a positive millisecond bound.
+    /// The typed sensor view; the same object Python exposes as `robot.sensors`.
+    pub fn sensors(&self) -> Sensors<'_> {
+        Sensors {
+            source: SensorSource::Robot(self),
+        }
+    }
+    /// Deprecated: use [`Robot::sensors`] and [`Sensors::battery`].
+    #[deprecated(since = "0.8.1", note = "use sensors().battery(max_age)")]
     pub fn battery_with_age(&self, max_age: Option<Duration>) -> Result<Sample<Battery>> {
+        self.sensors().battery(max_age)
+    }
+    /// Deprecated: use [`Robot::sensors`] and [`Sensors::wrench`].
+    #[deprecated(since = "0.8.1", note = "use sensors().wrench(name, max_age)")]
+    pub fn wrench(&self, name: &str, max_age: Option<Duration>) -> Result<Sample<Wrench>> {
+        self.sensors().wrench(name, max_age)
+    }
+    /// Deprecated: use [`Robot::sensors`] and [`Sensors::temperature_json`].
+    #[deprecated(since = "0.8.1", note = "use sensors().temperature_json(name)")]
+    pub fn temperature_json(&self, name: &str) -> Result<String> {
+        self.sensors().temperature_json(name)
+    }
+    /// Deprecated: use [`Robot::sensors`] and [`Sensors::sensor_json`].
+    #[deprecated(since = "0.8.1", note = "use sensors().sensor_json(name, role)")]
+    pub fn sensor_json(&self, name: &str, role: Option<&str>) -> Result<String> {
+        self.sensors().sensor_json(name, role)
+    }
+    /// Deprecated: use [`Robot::sensors`] and [`Sensors::camera`].
+    #[deprecated(since = "0.8.1", note = "use sensors().camera(name)")]
+    pub fn camera(&self, name: &str) -> Result<Camera<'_>> {
+        self.sensors().camera(name)
+    }
+    /// Deprecated: use [`Robot::sensors`] and [`Sensors::imu`].
+    #[deprecated(since = "0.8.1", note = "use sensors().imu(name, max_age)")]
+    pub fn imu(&self, name: &str, max_age: Option<Duration>) -> Result<Sample<Imu>> {
+        self.sensors().imu(name, max_age)
+    }
+    /// Deprecated: use [`Robot::sensors`] and [`Sensors::ultrasonic`].
+    #[deprecated(since = "0.8.1", note = "use sensors().ultrasonic(name, max_age)")]
+    pub fn ultrasonic(&self, name: &str, max_age: Option<Duration>) -> Result<Sample<Ultrasonic>> {
+        self.sensors().ultrasonic(name, max_age)
+    }
+    /// Deprecated: use [`Robot::sensors`] and [`Sensors::lidar_2d`].
+    #[deprecated(since = "0.8.1", note = "use sensors().lidar_2d(name, max_age)")]
+    pub fn lidar_2d(&self, name: &str, max_age: Option<Duration>) -> Result<Lidar2d> {
+        self.sensors().lidar_2d(name, max_age)
+    }
+    /// Deprecated: use [`Robot::sensors`] and [`Sensors::lidar_3d`].
+    #[deprecated(since = "0.8.1", note = "use sensors().lidar_3d(name, max_age)")]
+    pub fn lidar_3d(&self, name: &str, max_age: Option<Duration>) -> Result<Lidar3d> {
+        self.sensors().lidar_3d(name, max_age)
+    }
+}
+impl DiagnosticClient {
+    /// The same typed sensor view a [`Robot`] offers, read-only.
+    pub fn sensors(&self) -> Sensors<'_> {
+        Sensors {
+            source: SensorSource::Diagnostic(self),
+        }
+    }
+    /// The battery state through the read-only client.
+    pub fn battery(&self, max_age: Option<Duration>) -> Result<Sample<Battery>> {
+        self.sensors().battery(max_age)
+    }
+}
+impl<'a> Sensors<'a> {
+    /// The battery state; `None` accepts any sample age, `Some` is a bound.
+    pub fn battery(&self, max_age: Option<Duration>) -> Result<Sample<Battery>> {
         let mut value = Battery {
             struct_size: std::mem::size_of::<Battery>() as u32,
             ..Default::default()
@@ -34,7 +120,12 @@ impl Robot {
         let mut age = 0;
         let bound = sensor_age(max_age)?;
         call(|e| unsafe {
-            ffi::dex_robot_battery_ex(self.0.as_ptr(), bound, &mut value, &mut age, e)
+            self.source.call(|h| match h {
+                Handle::Robot(r) => ffi::dex_robot_battery_ex(r, bound, &mut value, &mut age, e),
+                Handle::Diagnostic(c) => {
+                    ffi::dex_diagnostic_battery_ex(c, bound, &mut value, &mut age, e)
+                }
+            })
         })?;
         Ok(Sample {
             value,
@@ -48,15 +139,26 @@ impl Robot {
         let mut time = 0;
         let mut age = 0;
         call(|e| unsafe {
-            ffi::dex_robot_wrench_ex(
-                self.0.as_ptr(),
-                name.as_ptr(),
-                bound,
-                values.as_mut_ptr(),
-                &mut time,
-                &mut age,
-                e,
-            )
+            self.source.call(|h| match h {
+                Handle::Robot(r) => ffi::dex_robot_wrench_ex(
+                    r,
+                    name.as_ptr(),
+                    bound,
+                    values.as_mut_ptr(),
+                    &mut time,
+                    &mut age,
+                    e,
+                ),
+                Handle::Diagnostic(c) => ffi::dex_diagnostic_wrench_ex(
+                    c,
+                    name.as_ptr(),
+                    bound,
+                    values.as_mut_ptr(),
+                    &mut time,
+                    &mut age,
+                    e,
+                ),
+            })
         })?;
         Ok(Sample {
             value: Wrench {
@@ -69,25 +171,39 @@ impl Robot {
     pub fn temperature_json(&self, name: &str) -> Result<String> {
         let name = string(name)?;
         text(|out, e| unsafe {
-            ffi::dex_robot_temperature_json(self.0.as_ptr(), name.as_ptr(), out, e)
+            self.source.call(|h| match h {
+                Handle::Robot(r) => ffi::dex_robot_temperature_json(r, name.as_ptr(), out, e),
+                Handle::Diagnostic(c) => {
+                    ffi::dex_diagnostic_temperature_json(c, name.as_ptr(), out, e)
+                }
+            })
         })
     }
     pub fn sensor_json(&self, name: &str, role: Option<&str>) -> Result<String> {
         let name = string(name)?;
         let role = role.map(string).transpose()?;
         text(|out, e| unsafe {
-            ffi::dex_robot_sensor_json(
-                self.0.as_ptr(),
-                name.as_ptr(),
-                role.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
-                out,
-                e,
-            )
+            self.source.call(|h| match h {
+                Handle::Robot(r) => ffi::dex_robot_sensor_json(
+                    r,
+                    name.as_ptr(),
+                    role.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
+                    out,
+                    e,
+                ),
+                Handle::Diagnostic(c) => ffi::dex_diagnostic_sensor_json(
+                    c,
+                    name.as_ptr(),
+                    role.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
+                    out,
+                    e,
+                ),
+            })
         })
     }
-    pub fn camera<'a>(&'a self, name: &str) -> Result<Camera<'a>> {
+    pub fn camera(&self, name: &str) -> Result<Camera<'a>> {
         Ok(Camera {
-            robot: self,
+            source: self.source,
             name: string(name)?,
         })
     }
@@ -100,14 +216,14 @@ impl Robot {
         };
         let mut age = 0;
         call(|e| unsafe {
-            ffi::dex_robot_imu_ex(
-                self.0.as_ptr(),
-                name.as_ptr(),
-                bound,
-                &mut value,
-                &mut age,
-                e,
-            )
+            self.source.call(|h| match h {
+                Handle::Robot(r) => {
+                    ffi::dex_robot_imu_ex(r, name.as_ptr(), bound, &mut value, &mut age, e)
+                }
+                Handle::Diagnostic(c) => {
+                    ffi::dex_diagnostic_imu_ex(c, name.as_ptr(), bound, &mut value, &mut age, e)
+                }
+            })
         })?;
         Ok(Sample {
             value,
@@ -123,14 +239,19 @@ impl Robot {
         };
         let mut age = 0;
         call(|e| unsafe {
-            ffi::dex_robot_ultrasonic_ex(
-                self.0.as_ptr(),
-                name.as_ptr(),
-                bound,
-                &mut value,
-                &mut age,
-                e,
-            )
+            self.source.call(|h| match h {
+                Handle::Robot(r) => {
+                    ffi::dex_robot_ultrasonic_ex(r, name.as_ptr(), bound, &mut value, &mut age, e)
+                }
+                Handle::Diagnostic(c) => ffi::dex_diagnostic_ultrasonic_ex(
+                    c,
+                    name.as_ptr(),
+                    bound,
+                    &mut value,
+                    &mut age,
+                    e,
+                ),
+            })
         })?;
         Ok(Sample {
             value,
@@ -142,7 +263,14 @@ impl Robot {
         let bound = sensor_age(max_age)?;
         let mut out = ptr::null_mut();
         let result = call(|e| unsafe {
-            ffi::dex_robot_lidar_2d_take(self.0.as_ptr(), name.as_ptr(), bound, &mut out, e)
+            self.source.call(|h| match h {
+                Handle::Robot(r) => {
+                    ffi::dex_robot_lidar_2d_take(r, name.as_ptr(), bound, &mut out, e)
+                }
+                Handle::Diagnostic(c) => {
+                    ffi::dex_diagnostic_lidar_2d_take(c, name.as_ptr(), bound, &mut out, e)
+                }
+            })
         });
         let handle = NonNull::new(out).map(Lidar2d);
         result?;
@@ -153,7 +281,14 @@ impl Robot {
         let bound = sensor_age(max_age)?;
         let mut out = ptr::null_mut();
         let result = call(|e| unsafe {
-            ffi::dex_robot_lidar_3d_take(self.0.as_ptr(), name.as_ptr(), bound, &mut out, e)
+            self.source.call(|h| match h {
+                Handle::Robot(r) => {
+                    ffi::dex_robot_lidar_3d_take(r, name.as_ptr(), bound, &mut out, e)
+                }
+                Handle::Diagnostic(c) => {
+                    ffi::dex_diagnostic_lidar_3d_take(c, name.as_ptr(), bound, &mut out, e)
+                }
+            })
         });
         let handle = NonNull::new(out).map(Lidar3d);
         result?;
@@ -311,25 +446,48 @@ unsafe fn borrowed<'a, T>(data: *const T, count: usize) -> Result<&'a [T]> {
     Ok(unsafe { std::slice::from_raw_parts(data, count) })
 }
 pub struct Camera<'a> {
-    robot: &'a Robot,
+    source: SensorSource<'a>,
     name: CString,
 }
 impl Camera<'_> {
+    /// Query the server JSON object without subscribing to images.
+    /// Fields are device-dependent; each call queries fresh information.
+    pub fn info_json(&self, timeout: Duration) -> Result<String> {
+        let timeout = millis(timeout)?;
+        text(|out, e| unsafe {
+            self.source.call(|h| match h {
+                Handle::Robot(r) => {
+                    ffi::dex_robot_camera_info_json(r, self.name.as_ptr(), timeout, out, e)
+                }
+                Handle::Diagnostic(c) => {
+                    ffi::dex_diagnostic_camera_info_json(c, self.name.as_ptr(), timeout, out, e)
+                }
+            })
+        })
+    }
     pub fn streams(&self) -> Result<Vec<String>> {
         let mut n = 0;
         call(|e| unsafe {
-            ffi::dex_robot_camera_stream_count(self.robot.0.as_ptr(), self.name.as_ptr(), &mut n, e)
+            self.source.call(|h| match h {
+                Handle::Robot(r) => {
+                    ffi::dex_robot_camera_stream_count(r, self.name.as_ptr(), &mut n, e)
+                }
+                Handle::Diagnostic(c) => {
+                    ffi::dex_diagnostic_camera_stream_count(c, self.name.as_ptr(), &mut n, e)
+                }
+            })
         })?;
         (0..n)
             .map(|i| {
                 text(|out, e| unsafe {
-                    ffi::dex_robot_camera_stream_name(
-                        self.robot.0.as_ptr(),
-                        self.name.as_ptr(),
-                        i,
-                        out,
-                        e,
-                    )
+                    self.source.call(|h| match h {
+                        Handle::Robot(r) => {
+                            ffi::dex_robot_camera_stream_name(r, self.name.as_ptr(), i, out, e)
+                        }
+                        Handle::Diagnostic(c) => {
+                            ffi::dex_diagnostic_camera_stream_name(c, self.name.as_ptr(), i, out, e)
+                        }
+                    })
                 })
             })
             .collect()
@@ -338,37 +496,60 @@ impl Camera<'_> {
     pub fn subscribe(&self, stream: &str, history: usize) -> Result<()> {
         let stream = string(stream)?;
         call(|e| unsafe {
-            ffi::dex_robot_camera_subscribe(
-                self.robot.0.as_ptr(),
-                self.name.as_ptr(),
-                stream.as_ptr(),
-                history,
-                e,
-            )
+            self.source.call(|h| match h {
+                Handle::Robot(r) => ffi::dex_robot_camera_subscribe(
+                    r,
+                    self.name.as_ptr(),
+                    stream.as_ptr(),
+                    history,
+                    e,
+                ),
+                Handle::Diagnostic(c) => ffi::dex_diagnostic_camera_subscribe(
+                    c,
+                    self.name.as_ptr(),
+                    stream.as_ptr(),
+                    history,
+                    e,
+                ),
+            })
         })
     }
     pub fn unsubscribe(&self, stream: &str) -> Result<()> {
         let stream = string(stream)?;
         call(|e| unsafe {
-            ffi::dex_robot_camera_unsubscribe(
-                self.robot.0.as_ptr(),
-                self.name.as_ptr(),
-                stream.as_ptr(),
-                e,
-            )
+            self.source.call(|h| match h {
+                Handle::Robot(r) => {
+                    ffi::dex_robot_camera_unsubscribe(r, self.name.as_ptr(), stream.as_ptr(), e)
+                }
+                Handle::Diagnostic(c) => ffi::dex_diagnostic_camera_unsubscribe(
+                    c,
+                    self.name.as_ptr(),
+                    stream.as_ptr(),
+                    e,
+                ),
+            })
         })
     }
     pub fn latest_frame(&self, stream: &str) -> Result<Option<Frame>> {
         let stream = string(stream)?;
         let mut out = ptr::null_mut();
         let result = call(|e| unsafe {
-            ffi::dex_robot_camera_latest_frame(
-                self.robot.0.as_ptr(),
-                self.name.as_ptr(),
-                stream.as_ptr(),
-                &mut out,
-                e,
-            )
+            self.source.call(|h| match h {
+                Handle::Robot(r) => ffi::dex_robot_camera_latest_frame(
+                    r,
+                    self.name.as_ptr(),
+                    stream.as_ptr(),
+                    &mut out,
+                    e,
+                ),
+                Handle::Diagnostic(c) => ffi::dex_diagnostic_camera_latest_frame(
+                    c,
+                    self.name.as_ptr(),
+                    stream.as_ptr(),
+                    &mut out,
+                    e,
+                ),
+            })
         });
         let frame = NonNull::new(out).map(Frame);
         result?;
@@ -381,13 +562,18 @@ impl Camera<'_> {
             ..Default::default()
         };
         call(|e| unsafe {
-            ffi::dex_robot_camera_stats(
-                self.robot.0.as_ptr(),
-                self.name.as_ptr(),
-                stream.as_ptr(),
-                &mut out,
-                e,
-            )
+            self.source.call(|h| match h {
+                Handle::Robot(r) => {
+                    ffi::dex_robot_camera_stats(r, self.name.as_ptr(), stream.as_ptr(), &mut out, e)
+                }
+                Handle::Diagnostic(c) => ffi::dex_diagnostic_camera_stats(
+                    c,
+                    self.name.as_ptr(),
+                    stream.as_ptr(),
+                    &mut out,
+                    e,
+                ),
+            })
         })?;
         Ok(out)
     }
@@ -396,14 +582,24 @@ impl Camera<'_> {
         let window = duration_ms(window)?;
         let mut active = false;
         call(|e| unsafe {
-            ffi::dex_robot_camera_is_active(
-                self.robot.0.as_ptr(),
-                self.name.as_ptr(),
-                stream.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
-                window,
-                &mut active,
-                e,
-            )
+            self.source.call(|h| match h {
+                Handle::Robot(r) => ffi::dex_robot_camera_is_active(
+                    r,
+                    self.name.as_ptr(),
+                    stream.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
+                    window,
+                    &mut active,
+                    e,
+                ),
+                Handle::Diagnostic(c) => ffi::dex_diagnostic_camera_is_active(
+                    c,
+                    self.name.as_ptr(),
+                    stream.as_ref().map_or(ptr::null(), |s| s.as_ptr()),
+                    window,
+                    &mut active,
+                    e,
+                ),
+            })
         })?;
         Ok(active)
     }

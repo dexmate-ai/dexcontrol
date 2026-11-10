@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Monitor the IMU associated with a 3D LiDAR.
 //
@@ -29,7 +22,7 @@ int main(int argc, char **argv) {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
         while (true) {
             try {
-                (void)robot.imu(sensor);
+                (void)robot.sensors().imu(sensor);
                 break;
             } catch (const dexcontrol::Error &error) {
                 if (error.status() != DEX_STATE_UNAVAILABLE) throw;
@@ -40,7 +33,7 @@ int main(int argc, char **argv) {
             examples::sleep_for(0.02);
         }
         for (size_t index = 0; !examples::interrupted() && (!samples || index < static_cast<size_t>(*samples)); ++index) {
-            const auto imu = robot.imu(sensor);
+            const auto imu = robot.sensors().imu(sensor);
             std::cout << "acceleration=" << examples::format(imu.acceleration)
                       << " angular_velocity=" << examples::format(imu.angular_velocity)
                       << " orientation=" << examples::format(imu.orientation, 4) << "\n";

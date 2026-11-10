@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 //! Joint feedback and firmware operations through the public native ABI.
 use crate::*;
 #[derive(Debug, Clone)]
@@ -73,7 +66,7 @@ impl JointComponent {
         }))
     }
     /// Read independent channel lengths and local arrival age, without fabricating missing values.
-    pub fn joint_state(&self, max_age: DurationLimit) -> Result<JointState> {
+    pub fn get_joint_state(&self, max_age: DurationLimit) -> Result<JointState> {
         let n = self.count()?;
         let mut position = vec![0.; n];
         let mut velocity = position.clone();
@@ -121,7 +114,7 @@ impl JointComponent {
             age: Duration::from_millis(age),
         })
     }
-    pub fn joint_errors(&self) -> Result<Vec<u32>> {
+    pub fn get_joint_err(&self) -> Result<Vec<u32>> {
         array(|v, n, c, e| unsafe { ffi::dex_component_get_joint_err(self.0.as_ptr(), v, n, c, e) })
     }
     pub fn is_joint_pos_reached(&self, target: &[f64], tolerance: f64) -> Result<bool> {
@@ -162,15 +155,18 @@ impl JointComponent {
             )
         })
     }
+    /// Starts a tracked move and applies `wait` before returning. On failure the
+    /// error carries the motion handle when the command may have reached the
+    /// robot, so the caller can cancel or observe it; `?` into [`Error`] drops it.
     pub fn move_to_joint_pos_with(
         &self,
         target: &[f64],
         options: MotionOptions,
         wait: WaitOptions,
-    ) -> Result<MotionHandle> {
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
         let options = options.native()?;
         let wait = wait.native()?;
-        MotionHandle::start(|out, e| unsafe {
+        MotionHandle::start_recoverable(|out, e| unsafe {
             ffi::dex_component_move_to_joint_pos_opt(
                 self.0.as_ptr(),
                 target.as_ptr(),
@@ -182,17 +178,48 @@ impl JointComponent {
             )
         })
     }
+    /// Deprecated: [`JointComponent::move_to_joint_pos_with`] now returns the same
+    /// `MotionStartError`, with the handle when the command may have reached the robot.
+    #[deprecated(since = "0.8.1", note = "use move_to_joint_pos_with")]
+    pub fn move_to_joint_pos_with_recoverable(
+        &self,
+        target: &[f64],
+        options: MotionOptions,
+        wait: WaitOptions,
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
+        self.move_to_joint_pos_with(target, options, wait)
+    }
+    /// Streams an untracked goal to the motion plugin: the counterpart of
+    /// `move_to_joint_pos_with` for a control loop that updates the goal
+    /// every tick. The plugin smooths towards the newest goal within its own
+    /// velocity, acceleration and jerk bounds, so no step guard applies and
+    /// nothing is returned to wait on. Refused while a tracked motion of this
+    /// component is still running. `wait_ceiling` in the options is ignored.
+    pub fn stream_joint_pos(&self, target: &[f64], options: MotionOptions) -> Result<()> {
+        let options = options.native()?;
+        call(|e| unsafe {
+            ffi::dex_component_stream_joint_pos(
+                self.0.as_ptr(),
+                target.as_ptr(),
+                target.len(),
+                &options,
+                e,
+            )
+        })
+    }
+    /// Starts a tracked move to a named pose and applies `wait` before
+    /// returning; the error carries the handle like [`JointComponent::move_to_joint_pos_with`].
     pub fn go_to_pose_with(
         &self,
         pose: &str,
         passthrough: bool,
         options: MotionOptions,
         wait: WaitOptions,
-    ) -> Result<MotionHandle> {
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
         let pose = string(pose)?;
         let options = options.native()?;
         let wait = wait.native()?;
-        MotionHandle::start(|out, e| unsafe {
+        MotionHandle::start_recoverable(|out, e| unsafe {
             ffi::dex_component_go_to_pose_opt(
                 self.0.as_ptr(),
                 pose.as_ptr(),
@@ -204,21 +231,35 @@ impl JointComponent {
             )
         })
     }
+    /// Deprecated: [`JointComponent::go_to_pose_with`] now returns the same
+    /// `MotionStartError`, with the handle when the command may have reached the robot.
+    #[deprecated(since = "0.8.1", note = "use go_to_pose_with")]
+    pub fn go_to_pose_with_recoverable(
+        &self,
+        pose: &str,
+        passthrough: bool,
+        options: MotionOptions,
+        wait: WaitOptions,
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
+        self.go_to_pose_with(pose, passthrough, options, wait)
+    }
+    /// Starts a tracked joint-space trajectory and applies `wait` before
+    /// returning; the error carries the handle like [`JointComponent::move_to_joint_pos_with`].
     pub fn move_joint_trajectory(
         &self,
         positions: &[Vec<f64>],
         times: &[f64],
         options: MotionOptions,
         wait: WaitOptions,
-    ) -> Result<MotionHandle> {
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
         let joints = rectangular(positions)?;
         if times.len() != positions.len() {
-            return Err(invalid("One timestamp is required per waypoint"));
+            return Err(invalid("One timestamp is required per waypoint").into());
         }
         let flat: Vec<f64> = positions.iter().flatten().copied().collect();
         let options = options.native()?;
         let wait = wait.native()?;
-        MotionHandle::start(|out, e| unsafe {
+        MotionHandle::start_recoverable(|out, e| unsafe {
             ffi::dex_component_move_joint_trajectory_opt(
                 self.0.as_ptr(),
                 flat.as_ptr(),
@@ -231,6 +272,18 @@ impl JointComponent {
                 e,
             )
         })
+    }
+    /// Deprecated: [`JointComponent::move_joint_trajectory`] now returns the same
+    /// `MotionStartError`, with the handle when the command may have reached the robot.
+    #[deprecated(since = "0.8.1", note = "use move_joint_trajectory")]
+    pub fn move_joint_trajectory_recoverable(
+        &self,
+        positions: &[Vec<f64>],
+        times: &[f64],
+        options: MotionOptions,
+        wait: WaitOptions,
+    ) -> std::result::Result<MotionHandle, MotionStartError<MotionHandle>> {
+        self.move_joint_trajectory(positions, times, options, wait)
     }
     /// Send a position command with optional per-joint step limits and a feedback-age bound.
     pub fn command_position(
@@ -254,11 +307,77 @@ impl JointComponent {
             )
         })
     }
+    /// Deprecated alias of [`JointComponent::get_joint_state`].
+    #[deprecated(since = "0.8.1", note = "use get_joint_state")]
+    pub fn joint_state(&self, max_age: DurationLimit) -> Result<JointState> {
+        self.get_joint_state(max_age)
+    }
+    /// Deprecated alias of [`JointComponent::get_joint_err`].
+    #[deprecated(since = "0.8.1", note = "use get_joint_err")]
+    pub fn joint_errors(&self) -> Result<Vec<u32>> {
+        self.get_joint_err()
+    }
+    /// Deprecated alias of [`JointComponent::get_modes`].
+    #[deprecated(since = "0.8.1", note = "use get_modes")]
+    pub fn modes(&self) -> Result<Vec<Option<JointMode>>> {
+        self.get_modes()
+    }
+    /// Sets one firmware mode on every joint; see [`JointComponent::set_modes`].
+    pub fn set_mode(&self, mode: JointMode) -> Result<String> {
+        let count = self.count()?;
+        self.set_modes(&vec![mode; count])
+    }
+    /// Deprecated alias of [`JointComponent::get_idle_mode`].
+    #[deprecated(since = "0.8.1", note = "use get_idle_mode")]
+    pub fn idle_mode(&self) -> Result<Option<bool>> {
+        self.get_idle_mode()
+    }
+    /// Deprecated alias of [`JointComponent::get_button_state`].
+    #[deprecated(since = "0.8.1", note = "use get_button_state")]
+    pub fn button_state(&self) -> Result<Option<(bool, bool)>> {
+        self.get_button_state()
+    }
+    /// Deprecated alias of [`JointComponent::get_touch_data`].
+    #[deprecated(since = "0.8.1", note = "use get_touch_data")]
+    pub fn touch_forces(&self) -> Result<Option<Vec<f64>>> {
+        self.get_touch_data()
+    }
+    /// Deprecated alias of [`JointComponent::get_brake_status`].
+    #[deprecated(since = "0.8.1", note = "use get_brake_status")]
+    pub fn brake_status(&self) -> Result<String> {
+        self.get_brake_status()
+    }
+    /// Deprecated alias of [`JointComponent::get_force_torque_sensor_mode`].
+    #[deprecated(since = "0.8.1", note = "use get_force_torque_sensor_mode")]
+    pub fn force_torque_sensor_mode(&self) -> Result<String> {
+        self.get_force_torque_sensor_mode()
+    }
+    /// Deprecated alias of [`JointComponent::get_ee_baud_rate`].
+    #[deprecated(since = "0.8.1", note = "use get_ee_baud_rate")]
+    pub fn ee_baud_rate(&self) -> Result<String> {
+        self.get_ee_baud_rate()
+    }
+    /// Whether the state stream is usable now: a sample within the configured
+    /// freshness limit.
+    pub fn is_active(&self) -> Result<bool> {
+        let mut active = false;
+        call(|_| unsafe { ffi::dex_component_is_active(self.0.as_ptr(), &mut active) })?;
+        Ok(active)
+    }
+    /// Waits for the state stream to become usable; `Ok(false)` on timeout.
+    pub fn wait_for_active(&self, timeout: Duration) -> Result<bool> {
+        let timeout = duration_ms(timeout)?;
+        let mut active = false;
+        call(|e| unsafe {
+            ffi::dex_component_wait_for_active(self.0.as_ptr(), timeout, &mut active, e)
+        })?;
+        Ok(active)
+    }
     pub fn stop(&self) -> Result<()> {
         call(|e| unsafe { ffi::dex_component_stop(self.0.as_ptr(), e) })
     }
     /// Unknown native modes are returned as None, not silently mapped to an enabled mode.
-    pub fn modes(&self) -> Result<Vec<Option<JointMode>>> {
+    pub fn get_modes(&self) -> Result<Vec<Option<JointMode>>> {
         let codes: Vec<i32> = array(|v, n, c, e| unsafe {
             ffi::dex_component_get_modes(self.0.as_ptr(), v, n, c, e)
         })?;
@@ -329,7 +448,7 @@ impl JointComponent {
     pub fn set_idle_mode(&self, enabled: bool) -> Result<()> {
         call(|e| unsafe { ffi::dex_component_set_idle_mode(self.0.as_ptr(), enabled, e) })
     }
-    pub fn idle_mode(&self) -> Result<Option<bool>> {
+    pub fn get_idle_mode(&self) -> Result<Option<bool>> {
         let mut v = -1;
         call(|e| unsafe { ffi::dex_component_idle_mode(self.0.as_ptr(), &mut v, e) })?;
         Ok(match v {
@@ -355,14 +474,14 @@ impl JointComponent {
         })?;
         Ok(present.then_some(data))
     }
-    pub fn button_state(&self) -> Result<Option<(bool, bool)>> {
+    pub fn get_button_state(&self) -> Result<Option<(bool, bool)>> {
         let (mut blue, mut green, mut present) = (false, false, false);
         call(|e| unsafe {
             ffi::dex_component_button_state(self.0.as_ptr(), &mut blue, &mut green, &mut present, e)
         })?;
         Ok(present.then_some((blue, green)))
     }
-    pub fn touch_forces(&self) -> Result<Option<Vec<f64>>> {
+    pub fn get_touch_data(&self) -> Result<Option<Vec<f64>>> {
         let mut present = false;
         let data = array(|v, n, c, e| unsafe {
             ffi::dex_component_touch_forces(self.0.as_ptr(), v, n, c, &mut present, e)
@@ -385,15 +504,15 @@ impl JointComponent {
     pub fn get_pid(&self) -> Result<String> {
         text(|out, e| unsafe { ffi::dex_component_get_pid(self.0.as_ptr(), out, e) })
     }
-    pub fn brake_status(&self) -> Result<String> {
+    pub fn get_brake_status(&self) -> Result<String> {
         text(|out, e| unsafe { ffi::dex_component_brake_status(self.0.as_ptr(), out, e) })
     }
-    pub fn force_torque_sensor_mode(&self) -> Result<String> {
+    pub fn get_force_torque_sensor_mode(&self) -> Result<String> {
         text(|out, e| unsafe {
             ffi::dex_component_force_torque_sensor_mode(self.0.as_ptr(), out, e)
         })
     }
-    pub fn ee_baud_rate(&self) -> Result<String> {
+    pub fn get_ee_baud_rate(&self) -> Result<String> {
         text(|out, e| unsafe { ffi::dex_component_ee_baud_rate(self.0.as_ptr(), out, e) })
     }
 }

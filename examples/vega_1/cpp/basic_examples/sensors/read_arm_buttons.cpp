@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Read and print arm wrist-button states.
 //
@@ -25,7 +18,7 @@ int main(int argc, char **argv) {
         auto robot = args.connect();
         auto arm = robot.joints(args.side() + "_arm");
         for (int index = 0; index < samples; ++index) {
-            const auto buttons = arm.button_state();
+            const auto buttons = arm.get_button_state();
             if (buttons) {
                 std::cout << "blue=" << (buttons->first ? "pressed" : "released")
                           << " green=" << (buttons->second ? "pressed" : "released") << "\n";

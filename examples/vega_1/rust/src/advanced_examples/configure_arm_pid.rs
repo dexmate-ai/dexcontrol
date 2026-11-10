@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Read or set arm PID multipliers.
 //!
@@ -18,10 +11,9 @@ use dexcontrol_examples::{component_name, invalid, Args, Result};
 
 #[tokio::main]
 async fn main() -> Result {
-    let args = Args::parse(
+    let args = Args::parse_with_positionals(
         "Read or set arm PID multipliers. Require positional get or set. Address both arms by default; set sends seven multipliers, each defaulting to 1.0. Print service replies. PID writes can take about 40 s; the SDK waits up to 45 s for a reply. A timeout does not cancel a server-side write. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
-        &["p", "side"],
-    );
+        &["p", "side"], "action: get | set");
     let action = args.positional(0, "");
     if action != "get" && action != "set" {
         return Err(invalid("action must be get or set"));

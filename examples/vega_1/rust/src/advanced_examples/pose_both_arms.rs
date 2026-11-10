@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Move both arms to a named pose using independent tracked motions.
 //!
@@ -34,7 +27,7 @@ async fn main() -> Result {
                 .get_pose(&pose, args.flag("passthrough"))?;
             targets.insert(name.to_owned(), target);
         }
-        let group = robot.move_to_joint_positions(
+        let group = robot.move_to_joint_pos(
             &targets,
             MotionOptions {
                 velocity_scale: Some(args.number("velocity-scale", 0.5)?),

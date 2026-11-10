@@ -1,18 +1,11 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Clear errors on all supported robot components.
 
 Send clear-error requests, print each component outcome, and exit nonzero if any outcome failed. This is a mutating maintenance operation.
 
-Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
+Uses a Robot control connection with startup arm initialization turned off: an arm whose motor cannot enable is the usual reason to clear errors, and the default connection would fail on it before any request is sent. Shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
 
 from __future__ import annotations
 
@@ -46,7 +39,9 @@ def main() -> None:
     elif args.profile:
         options["profile"] = args.profile
 
-    with Robot(**options, simulation=args.simulated) as robot:
+    with Robot(
+        **options, simulation=args.simulated, initialize_arm_modes=False
+    ) as robot:
         report = robot.clear_errors()
 
     failed = False

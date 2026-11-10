@@ -1,15 +1,8 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 //! Read-only diagnostics, runtime contexts and timing utilities.
 use crate::*;
-pub struct DiagnosticClient(NonNull<ffi::dex_diagnostic_t>);
+pub struct DiagnosticClient(pub(crate) NonNull<ffi::dex_diagnostic_t>);
 impl DiagnosticClient {
     pub fn connect(options: ConnectOptions<'_>) -> Result<Self> {
         options.with_native(|n| {

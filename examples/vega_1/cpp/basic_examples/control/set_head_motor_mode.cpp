@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Enable or disable head motors.
 //
@@ -25,5 +18,6 @@ int main(int argc, char **argv) {
         std::cout << robot.joints("head").set_mode(mode == "enable" ? dexcontrol::JointMode::Enable
                                                                      : dexcontrol::JointMode::Disable)
                   << "\n";
-    }, {});
+    }, {},
+       "mode: enable | disable (default: disable)");
 }

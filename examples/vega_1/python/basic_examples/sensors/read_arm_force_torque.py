@@ -1,25 +1,18 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Read and print one arm force-torque observation.
 
 Wait up to 5 s for the right-arm wrench stream and print one observation by default. Optional repeated reads use a 0.1 s interval; no calibration or zeroing is requested.
 
-Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
+Uses a read-only DiagnosticClient connection; motors are not initialized. Real hardware is selected unless --simulated is supplied."""
 
 import time
 from dataclasses import dataclass
 from typing import Literal, Optional
 
 import tyro
-from dexcontrol import Robot
+from dexcontrol import DiagnosticClient
 from typing_extensions import Annotated
 
 
@@ -43,7 +36,7 @@ class Args:
 
 def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
-    with Robot(
+    with DiagnosticClient(
         simulation=args.simulated, profile=args.profile, config_file=args.config
     ) as robot:
         wrench = robot.sensors.get_wrench(f"{args.side}_arm")

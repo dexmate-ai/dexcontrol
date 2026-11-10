@@ -1,13 +1,6 @@
 <!--
 Copyright (C) 2026 Dexmate Inc.
-
-This software is dual-licensed:
-
-1. GNU Affero General Public License v3.0 (AGPL-3.0)
-   See LICENSE-AGPL for details
-
-2. Commercial License
-   For commercial licensing terms, contact: contact@dexmate.ai
+SPDX-License-Identifier: Apache-2.0
 -->
 
 # Arm Tracking Benchmark
@@ -20,8 +13,9 @@ Benchmark scripts for measuring per-joint tracking performance of either arm. Us
 
 | Script              | Test Type          | Control Method                                        |
 | ------------------- | ------------------ | ----------------------------------------------------- |
-| `benchmark_arm_sine.py`  | Sine wave tracking | `set_joint_pos_vel` (position + velocity feedforward) |
+| `benchmark_arm_sine.py`  | Sine wave tracking | `set_joint_pos(q, joint_vel=qd)` (position + velocity feedforward) |
 | `benchmark_arm_step.py` | Step response      | `set_joint_pos` (position only)                       |
+| `benchmark_arm_stream.py` | Sine wave tracking through the motion plugin | `stream_joint_pos` (untracked goal, plugin-smoothed; the teleop path) |
 
 ## Usage
 

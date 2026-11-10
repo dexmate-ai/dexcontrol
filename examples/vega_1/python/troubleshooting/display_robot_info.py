@@ -1,12 +1,5 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Display robot topology, observed state, and server diagnostics.
 
@@ -90,12 +83,29 @@ def _humanize(value: Any) -> str:
     return str(value if value is not None else _DASH).replace("_", " ").title()
 
 
+def _end_effectors(snapshot: dict[str, Any]) -> str:
+    """Vega's bring-up report: the hand each side configures and what the robot says is there."""
+    bringup = snapshot.get("model_bringup") or {}
+    report = bringup.get("end_effectors") if isinstance(bringup, dict) else None
+    if not isinstance(report, dict):
+        return _DASH
+    # The core renders the line (same words as the connect log) so a
+    # mismatch names the profile and the variant to select. It quotes the
+    # robot's hand-type reply, so control characters are scrubbed before
+    # they reach the terminal.
+    summary = report.get("summary")
+    if not isinstance(summary, str) or not summary:
+        return _DASH
+    return "".join(" " if ch.isspace() or not ch.isprintable() else ch for ch in summary)
+
+
 def show_overview(snapshot: dict[str, Any]) -> None:
     rows = [
         ("Profile", str(snapshot.get("profile_name", _DASH))),
         ("Transport", "DexComm"),
         ("Components", ", ".join(snapshot.get("component_names", [])) or _DASH),
         ("Sensors", ", ".join(snapshot.get("sensor_names", [])) or "None enabled"),
+        ("End effectors", _end_effectors(snapshot)),
     ]
     table = _table(
         "Robot overview", (("", {"style": "cyan", "no_wrap": True}), ("", {}))

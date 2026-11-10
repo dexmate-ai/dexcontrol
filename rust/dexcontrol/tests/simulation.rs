@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 use dexcontrol::{MotionOptions, MotionState, Robot, Wait};
 use std::time::Duration;
 
@@ -45,9 +38,9 @@ fn errors_are_preserved_without_sending_invalid_commands() {
     assert!(head
         .set_joint_pos(&target, Wait::Timeout(Duration::ZERO))
         .is_err());
-    robot.set_software_estop(true).unwrap();
+    robot.estop_activate().unwrap();
     let error = head.set_joint_pos(&target, Wait::NoWait).unwrap_err();
-    assert_eq!(error.code, 8);
+    assert_eq!(error.kind(), dexcontrol::ErrorKind::EStopActive);
     assert!(error.message.contains("E-stop"));
     assert!(head.get_joint_pos().is_ok());
     robot.close().unwrap();
@@ -75,17 +68,17 @@ fn joint_feedback_limits_modes_and_direct_options() {
     use dexcontrol::{CommandOptions, DurationLimit, JointMode, WaitOptions};
     let robot = Robot::simulated("vega_1").unwrap();
     let head = robot.joints("head").unwrap();
-    let state = head.joint_state(DurationLimit::Configured).unwrap();
+    let state = head.get_joint_state(DurationLimit::Configured).unwrap();
     assert_eq!(state.position.len(), head.joint_names().unwrap().len());
     assert!(state.timestamp_ns > 0);
     let limits = head.joint_limits().unwrap().unwrap();
     assert_eq!(limits.lower.len(), state.position.len());
     assert_eq!(limits.upper.len(), limits.lower.len());
-    assert!(head.joint_errors().unwrap().iter().all(|code| *code == 0));
+    assert!(head.get_joint_err().unwrap().iter().all(|code| *code == 0));
     head.set_modes(&vec![JointMode::Position; state.position.len()])
         .unwrap();
     assert_eq!(
-        head.modes().unwrap(),
+        head.get_modes().unwrap(),
         vec![Some(JointMode::Position); state.position.len()]
     );
     head.set_joint_pos_with(
@@ -113,6 +106,31 @@ fn joint_feedback_limits_modes_and_direct_options() {
 }
 
 #[test]
+fn streamed_goals_follow_without_a_handle_and_validate_shape() {
+    use std::collections::BTreeMap;
+    let robot = Robot::simulated("vega_1").unwrap();
+    let arm = robot.joints("left_arm").unwrap();
+    let mut target = arm.get_joint_pos().unwrap();
+    target[0] += 0.05;
+    arm.stream_joint_pos(&target, MotionOptions::default())
+        .unwrap();
+    assert!(arm
+        .stream_joint_pos(&target[..3], MotionOptions::default())
+        .is_err());
+    let mut targets = BTreeMap::new();
+    targets.insert("left_arm".to_owned(), target.clone());
+    targets.insert("head".to_owned(), vec![0.0; 3]);
+    robot
+        .stream_joint_pos(&targets, MotionOptions::default())
+        .unwrap();
+    targets.insert("head".to_owned(), vec![0.0; 2]);
+    assert!(robot
+        .stream_joint_pos(&targets, MotionOptions::default())
+        .is_err());
+    robot.close().unwrap();
+}
+
+#[test]
 fn motion_groups_keep_members_alive_and_reject_bad_indices() {
     use std::collections::BTreeMap;
     let robot = Robot::simulated("vega_1").unwrap();
@@ -124,7 +142,7 @@ fn motion_groups_keep_members_alive_and_reject_bad_indices() {
         );
     }
     let group = robot
-        .move_to_joint_positions(&targets, MotionOptions::default())
+        .move_to_joint_pos(&targets, MotionOptions::default())
         .unwrap();
     assert_eq!(group.len().unwrap(), 2);
     assert!(!group.is_empty().unwrap());
@@ -213,7 +231,7 @@ fn invalid_options_and_strings_fail_before_a_command_is_sent() {
             .is_err());
     }
     assert!(head
-        .joint_state(DurationLimit::Maximum(Duration::from_nanos(1)))
+        .get_joint_state(DurationLimit::Maximum(Duration::from_nanos(1)))
         .is_err());
     assert!(head.request_json("bad\0role", "{}").is_err());
     assert!(robot.query("bad\0service", &[]).is_err());
@@ -228,12 +246,12 @@ fn emergency_stop_blocks_groups_trajectories_and_services_but_not_feedback() {
     let robot = Robot::simulated("vega_1").unwrap();
     let head = robot.joints("head").unwrap();
     let start = head.get_joint_pos().unwrap();
-    robot.set_software_estop(true).unwrap();
+    robot.estop_activate().unwrap();
     let status = robot.estop_status().unwrap();
     assert!(status.engaged && status.software_estop_enabled);
     let targets = BTreeMap::from([("head".to_owned(), start.clone())]);
     assert!(robot
-        .move_to_joint_positions(&targets, MotionOptions::default())
+        .move_to_joint_pos(&targets, MotionOptions::default())
         .is_err());
     let tracks = BTreeMap::from([(
         "head".to_owned(),
@@ -267,14 +285,29 @@ fn sensor_snapshots_outlive_connection_and_cameras_report_missing_frames() {
     .unwrap();
     assert!(
         robot
-            .battery_with_age(Some(Duration::from_secs(5)))
+            .sensors()
+            .battery(Some(Duration::from_secs(5)))
             .unwrap()
             .value
             .voltage
             > 0.
     );
-    assert!(robot.imu("head_camera", None).unwrap().value.timestamp_ns > 0);
-    let scan = robot.lidar_2d("lidar_2d_front", None).unwrap();
+    assert!(
+        robot
+            .sensors()
+            .imu("head_camera", None)
+            .unwrap()
+            .value
+            .timestamp_ns
+            > 0
+    );
+    let camera = robot.sensors().camera("head_camera").unwrap();
+    assert!(camera.info_json(Duration::ZERO).is_err());
+    // Simulation does not invent camera calibration or a camera-info server.
+    let error = camera.info_json(Duration::from_secs(1)).unwrap_err();
+    assert!(error.to_string().contains("sensors/head_camera/info"));
+
+    let scan = robot.sensors().lidar_2d("lidar_2d_front", None).unwrap();
     let lidar_robot = Robot::connect(ConnectOptions {
         profile: Some("vega_1p"),
         simulated: true,
@@ -282,9 +315,13 @@ fn sensor_snapshots_outlive_connection_and_cameras_report_missing_frames() {
         ..Default::default()
     })
     .unwrap();
-    let cloud = lidar_robot.lidar_3d("lidar_3d_front", None).unwrap();
+    let cloud = lidar_robot
+        .sensors()
+        .lidar_3d("lidar_3d_front", None)
+        .unwrap();
     assert!(
         lidar_robot
+            .sensors()
             .imu("lidar_3d_front", None)
             .unwrap()
             .value
@@ -293,7 +330,7 @@ fn sensor_snapshots_outlive_connection_and_cameras_report_missing_frames() {
     );
     lidar_robot.close().unwrap();
     drop(lidar_robot);
-    let camera = robot.camera("head_camera").unwrap();
+    let camera = robot.sensors().camera("head_camera").unwrap();
     let streams = camera.streams().unwrap();
     assert!(!streams.is_empty());
     camera.subscribe(&streams[0], 0).unwrap();
@@ -316,6 +353,63 @@ fn sensor_snapshots_outlive_connection_and_cameras_report_missing_frames() {
         cloud.intensity().is_ok() && cloud.ring().is_ok() && cloud.point_timestamps_ns().is_ok()
     );
     assert!(cloud.info().is_ok() && cloud.age().is_ok());
+}
+
+#[test]
+fn connecting_without_arm_initialization_keeps_the_arms_usable() {
+    use dexcontrol::ConnectOptions;
+    let robot = Robot::connect(ConnectOptions {
+        profile: Some("vega_1"),
+        simulated: true,
+        skip_arm_initialization: true,
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(robot.is_active().unwrap());
+    assert!(robot.has_component("left_arm").unwrap());
+    // The maintenance path a troubleshooting tool needs is still there.
+    assert!(robot.clear_errors_json().is_ok());
+    robot.close().unwrap();
+}
+
+#[test]
+fn diagnostic_client_reads_the_same_typed_sensors() {
+    use dexcontrol::{ConnectOptions, DiagnosticClient};
+    let client = DiagnosticClient::connect(ConnectOptions {
+        profile: Some("vega_1"),
+        simulated: true,
+        enable_sensors: vec!["head_camera", "lidar_2d_front", "chassis_imu"],
+        ..Default::default()
+    })
+    .unwrap();
+    let sensors = client.sensors();
+    assert!(sensors.imu("chassis_imu", None).unwrap().value.timestamp_ns > 0);
+    assert!(sensors.battery(None).unwrap().value.voltage > 0.);
+    assert!(client.battery(None).unwrap().value.voltage > 0.);
+    assert_eq!(
+        sensors
+            .lidar_2d("lidar_2d_front", None)
+            .unwrap()
+            .ranges()
+            .unwrap()
+            .len(),
+        2
+    );
+    let camera = sensors.camera("head_camera").unwrap();
+    assert_eq!(camera.streams().unwrap().len(), 3);
+    assert!(!camera.is_active(None, Duration::from_secs(1)).unwrap());
+    assert!(sensors
+        .temperature_json("left_arm")
+        .unwrap()
+        .contains("temperatures"));
+    assert!(sensors.imu("missing", None).is_err());
+    client.close().unwrap();
+
+    let robot = Robot::simulated("vega_1").unwrap();
+    let arm = robot.joints("left_arm").unwrap();
+    assert!(arm.is_active().unwrap());
+    assert!(arm.wait_for_active(Duration::from_millis(100)).unwrap());
+    robot.shutdown().unwrap();
 }
 
 #[test]
@@ -355,7 +449,7 @@ fn chassis_and_rate_limiter_validate_input() {
     let robot = Robot::simulated("vega_1").unwrap();
     let chassis = robot.chassis(None).unwrap();
     assert!(!chassis.steering_angle().unwrap().is_empty());
-    assert!(chassis.wheel_position().is_ok() && chassis.wheel_velocity().is_ok());
+    assert!(chassis.wheel_encoder_pos().is_ok() && chassis.wheel_velocity().is_ok());
     chassis
         .set_velocity(0., 0., 0., ChassisOptions::default())
         .unwrap();
@@ -373,4 +467,21 @@ fn chassis_and_rate_limiter_validate_input() {
     assert!(rate.average_rate().unwrap().is_finite());
     rate.reset().unwrap();
     rate.done().unwrap();
+}
+
+#[test]
+fn motion_start_errors_carry_the_handle() {
+    use dexcontrol::{ErrorKind, MotionOptions};
+    let robot = Robot::simulated("vega_1").unwrap();
+    let head = robot.joints("head").unwrap();
+    let failure = head
+        .move_to_joint_pos(&[0.0; 2], MotionOptions::default())
+        .unwrap_err();
+    assert_eq!(failure.error.kind(), ErrorKind::InvalidArgument);
+    assert!(failure.handle.is_none());
+    head.move_to_joint_pos(&[0.0; 3], MotionOptions::default())
+        .unwrap()
+        .wait_success(Duration::from_secs(1))
+        .unwrap();
+    robot.close().unwrap();
 }

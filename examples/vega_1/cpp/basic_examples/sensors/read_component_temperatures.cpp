@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Print component temperatures and battery status.
 //
@@ -43,7 +36,7 @@ int main(int argc, char **argv) {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             while (true) {
                 try {
-                    temperatures = robot.temperature_json(name);
+                    temperatures = robot.sensors().temperature_json(name);
                     break;
                 } catch (const dexcontrol::Error &) {
                     if (std::chrono::steady_clock::now() >= deadline) break;

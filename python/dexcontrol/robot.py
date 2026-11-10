@@ -1,12 +1,5 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """High-level Robot class: thin Python conveniences over the native runtime.
 
@@ -18,6 +11,8 @@ better in Python: the sensor accessor and a few small conveniences.
 from __future__ import annotations
 
 import weakref
+
+from dexcontrol.sensors.manager import Sensors
 from typing import Any
 
 from dexcontrol import _native
@@ -35,7 +30,7 @@ class Robot(_native.Robot):
 
     Args:
         profile: Built-in robot profile name. Defaults to the
-            ``DEXBOT_PROFILE`` environment variable, then to the profile the
+            ``ROBOT_CONFIG`` environment variable, then to the profile the
             ``ROBOT_NAME`` environment variable maps to, then ``vega_1``
             (with a warning). A ``ROBOT_NAME`` that names no known robot
             raises :class:`~dexcontrol.ConfigurationError` instead of
@@ -71,6 +66,24 @@ class Robot(_native.Robot):
             :class:`~dexcontrol.ConfigurationError` if the robot's versions
             service cannot be reached or verified. By default that only
             downgrades ``robot.health()["version_check"]``.
+        initialize_arm_modes: When true (the default), connecting puts
+            every arm into position mode once it is ready, and a required
+            arm that cannot be enabled fails the connection with
+            :class:`~dexcontrol.ComponentError`. Pass ``False`` to connect
+            without touching the arms: for troubleshooting (clearing a
+            component error on an arm whose motor will not enable) or for
+            an application that sets modes itself. Nothing else changes;
+            hands, head and chassis start as before.
+        adopt_detected_hardware: When true (the default), connecting asks a
+            Vega which hands it carries and adopts them: a known hand family
+            replaces the profile's hands (the ``_gripper`` or ``_f5d6``
+            variant's components are overlaid on the profile you chose, so
+            ``Robot("vega_1p")`` on a robot with grippers gets ``left_hand``
+            and ``right_hand``), a side the robot reports empty is
+            disabled, and the connect log says what was adopted over what.
+            Pass ``False`` to use the profile's hands exactly as configured;
+            a disagreement is then only a warning. A ``config_file`` is
+            never changed either way. Other models ignore this.
 
     Migration notes (from the pre-0.6 pure-Python package):
         * ``component.get_joint_pos(joint_id=3)`` (and the other
@@ -86,6 +99,38 @@ class Robot(_native.Robot):
           the robot may still be moving).
     """
 
+    # 0.5 ``Robot`` methods that no longer exist, plus the names migrators
+    # most often guess at. The message names the replacement.
+    _LEGACY_HINTS = {
+        "get_version_info": "use the `version_info` property",
+        "get_component_status": "use `component_status()`",
+        "query_hand_type": "hands are adopted from the robot at connect; see `has_component('left_hand')` and the connect log's `end effectors:` line",
+        "set_subscription_policy": "native state subscriptions are always on; camera streams use subscribe()/unsubscribe()",
+        "get_subscription_status": "native state subscriptions are always on",
+        "set_idle_timeout": "native state subscriptions are always on",
+        "wrench_sensor": "use `robot.sensors.get_wrench(component)`",
+        "temperature_sensor": "use `robot.sensors.get_temperature(component)`",
+        "clear_component_errors": "use `clear_errors()` or `clear_error(component)`",
+        "get_joint_pos": "joint getters live on components, e.g. `robot.left_arm.get_joint_pos()`",
+    }
+    _LEGACY_HAND_HINT = (
+        "the robot reported no hand there at connect (see the connect log's "
+        "`end effectors:` line); a hand the robot reports is adopted into any "
+        "profile, or select the variant that configures one, e.g. 'vega_1_f5d6'"
+    )
+
+    def __getattr__(self, name: str):
+        """Only reached after the native lookup (components, sensors) failed."""
+        message = f'Robot has no component or sensor "{name}"'
+        if name in ("left_hand", "right_hand"):
+            message += f": {self._LEGACY_HAND_HINT}"
+        elif name in self._LEGACY_HINTS:
+            message += (
+                f". Removed in dexcontrol 0.7: {self._LEGACY_HINTS[name]}. Legacy code can "
+                "import `dexcontrol.compat.v05.Robot`; see docs/MIGRATING-FROM-0.5.md"
+            )
+        raise AttributeError(message)
+
     def __init__(
         self,
         profile=None,
@@ -97,11 +142,14 @@ class Robot(_native.Robot):
         exit_on_safety_termination=None,
         context=None,
         require_version_check=False,
+        initialize_arm_modes=True,
+        adopt_detected_hardware=True,
         _sim_event_driven_estop=False,
     ):
         # The native __new__ has already connected using these arguments.
         del profile, config_file, enable_sensors, simulation, watchdog
         del exit_on_safety_termination, context, require_version_check
+        del initialize_arm_modes, adopt_detected_hardware
         del _sim_event_driven_estop
         self._sensor_manager = None
 
@@ -119,8 +167,6 @@ class Robot(_native.Robot):
         itself referenced while using it.
         """
         if self._sensor_manager is None:
-            from dexcontrol.sensors.manager import Sensors
-
             self._sensor_manager = Sensors(weakref.proxy(self))
         return self._sensor_manager
 
@@ -153,3 +199,8 @@ class Robot(_native.Robot):
         if side not in ("left", "right"):
             raise ValueError("side must be 'left' or 'right'")
         return self.has_component(f"{side}_hand")
+
+    def supports(self, component: str, capability: str) -> bool:
+        """Whether an enabled component declares a capability in this connection."""
+        info = self.component_info(component)
+        return bool(info["enabled"]) and capability in {item["id"] for item in info["capabilities"]}

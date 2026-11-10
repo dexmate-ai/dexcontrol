@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Read and print observations from configured IMUs.
 //!
@@ -54,7 +47,7 @@ async fn main() -> Result {
     }
     for _ in 0..samples {
         for sensor in &sensors {
-            let state = robot.imu(sensor, None)?.value;
+            let state = robot.sensors().imu(sensor, None)?.value;
             println!("\n{sensor}\n  acceleration:     {} m/s^2\n  angular_velocity: {} rad/s\n  orientation:      {}\n  magnetic_field:   {}\n  timestamp:        {} ns", format(&state.acceleration), format(&state.angular_velocity), format(&state.orientation), format(&state.magnetic_field), state.timestamp_ns);
         }
         pause(period).await;

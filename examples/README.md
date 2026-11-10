@@ -1,13 +1,6 @@
 <!--
 Copyright (C) 2026 Dexmate Inc.
-
-This software is dual-licensed:
-
-1. GNU Affero General Public License v3.0 (AGPL-3.0)
-   See LICENSE-AGPL for details
-
-2. Commercial License
-   For commercial licensing terms, contact: contact@dexmate.ai
+SPDX-License-Identifier: Apache-2.0
 -->
 
 # Cross-language examples
@@ -111,8 +104,11 @@ service. Some examples therefore report unavailable data/services in simulation.
 `display_robot_info` and `measure_robot_clock_offset` reject simulation (Python's
 argument parser rejects the unsupported flag; native examples reject it explicitly).
 
-Run the same hand-opening task from the repository root. This requires a
-hand-equipped profile: `vega_1` alone has no hands, whereas `vega_1_f5d6` does:
+Run the same hand-opening task from the repository root. In simulation this
+requires a hand-equipped profile: `vega_1` alone has no hands, whereas
+`vega_1_f5d6` does. On a real Vega the connection asks the robot which hands
+it carries and adopts them into whatever profile was selected, so `vega_1`
+works there; the simulation answers from the profile instead.
 
 ```sh
 python examples/vega_1/python/basic_examples/control/open_hand.py --simulated --profile vega_1_f5d6 --wait-time 0
@@ -148,7 +144,7 @@ Known differences:
   timing still require physical validation.
 - Python-only workflows: Cartesian planning/IK/admittance through `dexmotion`,
   three DualSense teleoperation programs plus two shared bases, and a GIL
-  stress benchmark. `_viewer.py` and benchmark `_tracking_helpers.py` are helpers.
+  stress benchmark. The sensor examples draw through `dexcontrol.viewer`; benchmark `_tracking_helpers.py` is a helper.
 - Native CLI validation uses per-task schemas. Flags from another task are
   rejected before opening a transport.
 

@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Read or set arm PID multipliers.
 //
@@ -37,5 +30,6 @@ int main(int argc, char **argv) {
             const auto result = action == "get" ? arm.get_pid() : arm.set_pid(p);
             std::cout << name << "_arm\n" << result << "\n";
         }
-    }, {"p", "side"});
+    }, {"p", "side"},
+       "action: get | set");
 }

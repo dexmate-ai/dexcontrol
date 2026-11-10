@@ -4,14 +4,14 @@ version = 4
 
 [[package]]
 name = "dexcontrol"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "pkg-config",
 ]
 
 [[package]]
 name = "dexcontrol-examples"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "dexcontrol",
  "serde_json",

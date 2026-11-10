@@ -1,27 +1,22 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Read, activate, or deactivate the software E-stop.
 //
 // Default positional action is status. activate requests software E-stop; deactivate clears it. Print the resulting observed status.
 //
-// Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.
+// Uses a Robot control connection with startup arm initialization turned off, so the tool also reaches an arm whose motor cannot enable; shutdown requests a stop. Real hardware is selected unless --simulated is supplied.
 
 #include "example.hpp"
 
 int main(int argc, char **argv) {
-    return examples::run(argc, argv, "Read, activate, or deactivate the software E-stop. Default positional action is status. activate requests software E-stop; deactivate clears it. Print the resulting observed status. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
+    return examples::run(argc, argv, "Read, activate, or deactivate the software E-stop. Default positional action is status. activate requests software E-stop; deactivate clears it. Print the resulting observed status. Uses a Robot control connection with startup arm initialization turned off, so the tool also reaches an arm whose motor cannot enable; shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
                          [](const examples::Args &args) {
         const auto action = args.positional_choice(0, {"status", "activate", "deactivate"}, "status");
 
-        auto robot = args.connect();
+        auto options = args.connect_options();
+        options.skip_arm_initialization = true;
+        auto robot = dexcontrol::Robot::connect(options);
         if (action == "activate") {
             robot.estop_activate();
         } else if (action == "deactivate") {
@@ -43,5 +38,6 @@ int main(int argc, char **argv) {
         if (status.engaged) {
             std::cout << "Robot writes are blocked. Read operations remain available.\n";
         }
-    }, {});
+    }, {},
+       "action: status | activate | deactivate (default: status)");
 }

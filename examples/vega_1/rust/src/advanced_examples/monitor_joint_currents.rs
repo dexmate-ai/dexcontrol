@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Monitor joint currents for components that report per-joint current.
 //!
@@ -38,7 +31,7 @@ async fn main() -> Result {
         for name in names {
             match robot.joints(&name).and_then(|handle| {
                 handle
-                    .joint_state(dexcontrol::DurationLimit::Configured)
+                    .get_joint_state(dexcontrol::DurationLimit::Configured)
                     .map(|state| (handle, state))
             }) {
                 Ok((handle, state)) if state.current.len() == handle.joint_names()?.len() => {
@@ -57,7 +50,7 @@ async fn main() -> Result {
         let mut index = 0;
         while samples == 0 || index < samples {
             for (name, handle) in &handles {
-                let state = handle.joint_state(dexcontrol::DurationLimit::Configured)?;
+                let state = handle.get_joint_state(dexcontrol::DurationLimit::Configured)?;
                 let values = handle
                     .joint_names()?
                     .iter()

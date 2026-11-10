@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Drive forward while sinusoidally changing both steering angles.
 //
@@ -32,14 +25,14 @@ int main(int argc, char **argv) {
         try {
             for (double elapsed = 0.0; elapsed < duration; elapsed = examples::elapsed(started)) {
                 const double steering = amplitude * std::sin(2.0 * M_PI * frequency * elapsed);
-                robot.set_chassis_motion_state({steering, steering}, {speed, speed});
+                robot.chassis().set_motion_state({steering, steering}, {speed, speed});
                 examples::sleep_for(period);
             }
         } catch (...) {
-            robot.stop_chassis();
+            robot.chassis().stop();
             throw;
         }
-        robot.stop_chassis();
+        robot.chassis().stop();
         // Stop and disconnect deliberately: a stop that cannot be delivered
         // is reported here rather than left to the handle's destructor.
         robot.close();

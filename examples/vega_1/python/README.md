@@ -1,13 +1,6 @@
 <!--
 Copyright (C) 2026 Dexmate Inc.
-
-This software is dual-licensed:
-
-1. GNU Affero General Public License v3.0 (AGPL-3.0)
-   See LICENSE-AGPL for details
-
-2. Commercial License
-   For commercial licensing terms, contact: contact@dexmate.ai
+SPDX-License-Identifier: Apache-2.0
 -->
 
 # Python examples
@@ -83,6 +76,7 @@ Managed motion does not provide collision avoidance. Wait timeouts bound client 
 | [basic_examples/sensors/monitor_wrist_cameras.py](basic_examples/sensors/monitor_wrist_cameras.py) | Monitor frames from the configured wrist cameras. |
 | [benchmark/arm_tracking/benchmark_arm_sine.py](benchmark/arm_tracking/benchmark_arm_sine.py) | Benchmark each arm joint with a sine trajectory and velocity feed-forward. |
 | [benchmark/arm_tracking/benchmark_arm_step.py](benchmark/arm_tracking/benchmark_arm_step.py) | Benchmark each arm joint with a ramped step trajectory. |
+| [benchmark/arm_tracking/benchmark_arm_stream.py](benchmark/arm_tracking/benchmark_arm_stream.py) | Benchmark each arm joint with a sine goal streamed through the motion plugin. |
 | [benchmark/connection/benchmark_connection_latency.py](benchmark/connection/benchmark_connection_latency.py) | Measure full Robot connection time and query round-trip latency. |
 | [troubleshooting/measure_robot_clock_offset.py](troubleshooting/measure_robot_clock_offset.py) | Estimate robot clock offset and network round-trip time. |
 | [troubleshooting/clear_component_errors.py](troubleshooting/clear_component_errors.py) | Clear errors on all supported robot components. |
@@ -95,7 +89,6 @@ Managed motion does not provide collision avoidance. Wait timeouts bound client 
 | [advanced_examples/run_cartesian_admittance.py](advanced_examples/run_cartesian_admittance.py) | Run wrench-based Cartesian admittance on both arms until interrupted. |
 | [advanced_examples/plan_arm_pose.py](advanced_examples/plan_arm_pose.py) | Plan and execute a both-arm named-pose move with dexmotion. |
 | [advanced_examples/offset_end_effectors.py](advanced_examples/offset_end_effectors.py) | Execute four planned relative end-effector moves with Enter prompts. |
-| [basic_examples/sensors/_viewer.py](basic_examples/sensors/_viewer.py) | Shared Rerun display helpers; not an executable example. |
 | [benchmark/arm_tracking/_tracking_helpers.py](benchmark/arm_tracking/_tracking_helpers.py) | Shared seven-joint tracking reference, CSV, and validation helpers. |
 | [benchmark/connection/stress_heartbeat_gil.py](benchmark/connection/stress_heartbeat_gil.py) | Monitor heartbeat status while creating Python GIL contention. |
 | [teleop/gamepad_arm_cartesian_control.py](teleop/gamepad_arm_cartesian_control.py) | Control arm end-effector translation and rotation with a DualSense gamepad. |

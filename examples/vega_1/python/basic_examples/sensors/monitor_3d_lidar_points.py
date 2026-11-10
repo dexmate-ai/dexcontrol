@@ -1,12 +1,5 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Monitor point clouds from one 3D LiDAR.
 
@@ -14,7 +7,7 @@ Enable the front 3D LiDAR, wait up to 10 s for activity, and poll continuously a
 
 Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
 
-Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
+Uses a read-only DiagnosticClient connection; motors are not initialized. Real hardware is selected unless --simulated is supplied."""
 
 import time
 from dataclasses import dataclass
@@ -22,8 +15,8 @@ from typing import Literal, Optional
 
 import numpy as np
 import tyro
-from _viewer import ViewerOptions, set_sample_time, start
-from dexcontrol import Robot
+from dexcontrol.viewer import ViewerOptions, set_sample_time, start
+from dexcontrol import DiagnosticClient
 from typing_extensions import Annotated
 
 
@@ -53,7 +46,7 @@ def main() -> None:
         raise ValueError("--samples must be non-negative")
 
     name = f"lidar_3d_{args.position}"
-    with Robot(
+    with DiagnosticClient(
         enable_sensors=[name],
         simulation=args.simulated,
         profile=args.profile,

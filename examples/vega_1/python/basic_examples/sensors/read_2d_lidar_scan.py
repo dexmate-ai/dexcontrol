@@ -1,12 +1,5 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 """Read and display one 2D LiDAR scan.
 
@@ -14,15 +7,15 @@ Enable lidar_2d_front, wait up to 10 s for activity, and read one cached scan. P
 
 Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
 
-Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied."""
+Uses a read-only DiagnosticClient connection; motors are not initialized. Real hardware is selected unless --simulated is supplied."""
 
 from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
 import tyro
-from _viewer import ViewerOptions, set_sample_time, start
-from dexcontrol import Robot
+from dexcontrol.viewer import ViewerOptions, set_sample_time, start
+from dexcontrol import DiagnosticClient
 from typing_extensions import Annotated
 
 
@@ -58,7 +51,7 @@ class Args(ViewerOptions):
 def main() -> None:
     args = tyro.cli(Args, description=__doc__, config=(tyro.conf.FlagCreatePairsOff,))
 
-    with Robot(
+    with DiagnosticClient(
         enable_sensors=[args.sensor],
         simulation=args.simulated,
         profile=args.profile,

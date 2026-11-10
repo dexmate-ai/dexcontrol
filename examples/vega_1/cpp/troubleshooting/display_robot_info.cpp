@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Display robot topology, observed state, and server diagnostics.
 //
@@ -18,6 +11,7 @@
 #include "json.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <set>
 
 namespace {
@@ -96,12 +90,28 @@ std::string join(const Json &list, const std::string &fallback) {
     return out.empty() ? fallback : out;
 }
 
+// Vega's bring-up report: the hand each side configures and what the robot says is there.
+std::string end_effectors(const Json &snapshot) {
+    // The core renders the line (same words as the connect log) so a
+    // mismatch names the profile and the variant to select. It quotes the
+    // robot's hand-type reply, so control characters are scrubbed before
+    // they reach the terminal.
+    const auto &summary = snapshot["model_bringup"]["end_effectors"]["summary"];
+    std::string line = summary.is_string() ? summary.text("") : "";
+    if (line.empty()) return DASH;
+    for (auto &ch : line) {
+        if (std::iscntrl(static_cast<unsigned char>(ch))) ch = ' ';
+    }
+    return line;
+}
+
 void show_overview(const Json &snapshot) {
     plain_table("Robot overview", {"Field", "Value"},
                 {{"Profile", snapshot["profile_name"].text(DASH)},
                  {"Transport", "DexComm"},
                  {"Components", join(snapshot["component_names"], DASH)},
-                 {"Sensors", join(snapshot["sensor_names"], "None enabled")}});
+                 {"Sensors", join(snapshot["sensor_names"], "None enabled")},
+                 {"End effectors", end_effectors(snapshot)}});
 }
 
 void show_joint_state(const Json &snapshot) {

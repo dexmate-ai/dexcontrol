@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Read and display one 2D LiDAR scan.
 //
@@ -27,7 +20,7 @@ int main(int argc, char **argv) {
         if (!robot.wait_for_state(sensor, std::chrono::seconds{10})) {
             throw std::runtime_error(sensor + " did not become active");
         }
-        const auto scan = robot.lidar_2d(sensor);
+        const auto scan = robot.sensors().lidar_2d(sensor);
         size_t finite = 0;
         double low = INFINITY, high = -INFINITY;
         for (const double range : scan.ranges) {

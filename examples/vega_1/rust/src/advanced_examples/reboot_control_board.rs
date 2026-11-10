@@ -1,24 +1,17 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Request a reboot of one robot control board.
 //!
 //! Require positional arm, torso, or chassis. The arm board controls both arms. A rebooting board stops controlling its joints, so ask for confirmation first and require typing yes; --yes skips the prompt and simulated runs do not prompt. Send the request and exit; do not wait for the board to come back online.
 //!
-//! Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.
+//! Uses a Robot control connection with startup arm initialization turned off, so the tool also reaches an arm whose motor cannot enable; shutdown requests a stop. Real hardware is selected unless --simulated is supplied.
 
 use dexcontrol_examples::{invalid, Args, Result};
 
 #[tokio::main]
 async fn main() -> Result {
-    let args = Args::parse("Request a reboot of one robot control board. Require positional arm, torso, or chassis. The arm board controls both arms. A rebooting board stops controlling its joints, so ask for confirmation first and require typing yes; --yes skips the prompt and simulated runs do not prompt. Send the request and exit; do not wait for the board to come back online. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.", &["yes"]);
+    let args = Args::parse_with_positionals("Request a reboot of one robot control board. Require positional arm, torso, or chassis. The arm board controls both arms. A rebooting board stops controlling its joints, so ask for confirmation first and require typing yes; --yes skips the prompt and simulated runs do not prompt. Send the request and exit; do not wait for the board to come back online. Uses a Robot control connection with startup arm initialization turned off, so the tool also reaches an arm whose motor cannot enable; shutdown requests a stop. Real hardware is selected unless --simulated is supplied.", &["yes"], "board: arm | torso | chassis");
     let board = args.positional(0, "");
     if !["arm", "torso", "chassis"].contains(&board.as_str()) {
         return Err(invalid("board must be arm, torso, or chassis"));
@@ -32,7 +25,9 @@ async fn main() -> Result {
             ""
         }
     ))?;
-    let robot = args.connect(&[]).await?;
+    let robot = args
+        .connect_with(&[], |options| options.skip_arm_initialization = true)
+        .await?;
     dexcontrol_examples::run_robot(&robot, async {
         robot.reboot(&board)?;
         println!("{board}: reboot request sent");

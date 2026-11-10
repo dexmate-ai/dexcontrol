@@ -1,24 +1,17 @@
 # Copyright (C) 2026 Dexmate Inc.
-#
-# This software is dual-licensed:
-#
-# 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-#    See LICENSE-AGPL for details
-#
-# 2. Commercial License
-#    For commercial licensing terms, contact: contact@dexmate.ai
+# SPDX-License-Identifier: Apache-2.0
 
 [package]
 publish = ["crates-io"]
 name = "dexcontrol"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 rust-version = "1.90"
-license = "AGPL-3.0-only OR LicenseRef-Dexmate-Commercial"
+license = "Apache-2.0"
 repository = "https://github.com/dexmate-ai/dexcontrol"
 description = "Safe Rust API for the precompiled DexControl robot runtime"
 links = "dexcontrol_capi"
-include = ["build.rs", "header.sha256", "src/ffi/mod.rs", "src/ffi/bindings.rs", "src/ffi/constants.rs", "src/lib.rs", "src/component.rs", "src/diagnostics.rs", "src/motion.rs", "src/options.rs", "src/robot.rs", "src/sensors.rs", "examples/read_joint_positions.rs", "Cargo.toml", "LICENSE", "LICENSE-AGPL", "LICENSE-HEADER"]
+include = ["build.rs", "header.sha256", "src/ffi/mod.rs", "src/ffi/bindings.rs", "src/ffi/constants.rs", "src/lib.rs", "src/component.rs", "src/diagnostics.rs", "src/motion.rs", "src/options.rs", "src/robot.rs", "src/sensors.rs", "examples/read_joint_positions.rs", "Cargo.toml", "LICENSE", "NOTICE", "LICENSE-HEADER"]
 
 [build-dependencies]
 pkg-config = "0.3"

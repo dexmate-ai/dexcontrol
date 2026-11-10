@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Read or set end-effector RS485 baud rates.
 //!
@@ -18,10 +11,9 @@ use dexcontrol_examples::{component_name, invalid, Args, Result};
 
 #[tokio::main]
 async fn main() -> Result {
-    let args = Args::parse(
+    let args = Args::parse_with_positionals(
         "Read or set end-effector RS485 baud rates. Require positional get or set. Address both arm end-effector interfaces by default; set uses 115200 baud unless overridden. Print service replies. Uses a Robot control connection: compatible arm modes may be enabled during startup, and shutdown requests a stop. Real hardware is selected unless --simulated is supplied.",
-        &["baud-rate", "side"],
-    );
+        &["baud-rate", "side"], "action: get | set");
     let action = args.positional(0, "");
     if action != "get" && action != "set" {
         return Err(invalid("action must be get or set"));
@@ -32,7 +24,7 @@ async fn main() -> Result {
         for side in args.sides()? {
             let arm = robot.joints(&component_name(side, "arm"))?;
             let result = if action == "get" {
-                arm.ee_baud_rate()?
+                arm.get_ee_baud_rate()?
             } else {
                 arm.set_ee_baud_rate(baud_rate)?
             };

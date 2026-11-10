@@ -1,65 +1,151 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 //! Multi-component commands and owned motion groups.
 use crate::*;
 use std::collections::BTreeMap;
+use std::ffi::c_char;
 #[derive(Debug, Clone)]
 pub struct TrajectoryTrack {
     pub positions: Vec<Vec<f64>>,
     pub velocities: Option<Vec<Vec<f64>>>,
 }
+/// The parallel C arrays of a `{component: values}` fan-out. The `CString`s
+/// own the bytes `names` points into and `positions` borrows `targets`, so a
+/// value lives exactly as long as the call it is built for.
+struct FanOut<'a> {
+    _strings: Vec<CString>,
+    names: Vec<*const c_char>,
+    positions: Vec<*const f64>,
+    counts: Vec<usize>,
+    _targets: std::marker::PhantomData<&'a BTreeMap<String, Vec<f64>>>,
+}
+impl<'a> FanOut<'a> {
+    fn new(targets: &'a BTreeMap<String, Vec<f64>>) -> Result<Self> {
+        let strings: Vec<CString> = targets.keys().map(|s| string(s)).collect::<Result<_>>()?;
+        Ok(Self {
+            names: strings.iter().map(|s| s.as_ptr()).collect(),
+            positions: targets.values().map(|v| v.as_ptr()).collect(),
+            counts: targets.values().map(Vec::len).collect(),
+            _strings: strings,
+            _targets: std::marker::PhantomData,
+        })
+    }
+    fn len(&self) -> usize {
+        self.names.len()
+    }
+}
 impl Robot {
-    pub fn set_joint_positions(
+    pub fn set_joint_pos(
         &self,
         targets: &BTreeMap<String, Vec<f64>>,
         options: CommandOptions,
     ) -> Result<()> {
-        let names: Vec<CString> = targets.keys().map(|s| string(s)).collect::<Result<_>>()?;
-        let names: Vec<_> = names.iter().map(|s| s.as_ptr()).collect();
-        let positions: Vec<_> = targets.values().map(|v| v.as_ptr()).collect();
-        let counts: Vec<_> = targets.values().map(Vec::len).collect();
+        let fan_out = FanOut::new(targets)?;
         let options = options.native()?;
         call(|e| unsafe {
             ffi::dex_robot_set_joint_pos_multi(
                 self.0.as_ptr(),
-                names.as_ptr(),
-                positions.as_ptr(),
-                counts.as_ptr(),
-                names.len(),
+                fan_out.names.as_ptr(),
+                fan_out.positions.as_ptr(),
+                fan_out.counts.as_ptr(),
+                fan_out.len(),
                 &options,
                 e,
             )
         })
     }
-    pub fn move_to_joint_positions(
+    /// Starts one tracked motion per component. A partial delivery failure
+    /// is an error whose `MotionStartError` carries the group of motions that
+    /// did start, so they can be cancelled or waited on; `?` into [`Error`]
+    /// drops the group.
+    pub fn move_to_joint_pos(
         &self,
         targets: &BTreeMap<String, Vec<f64>>,
         options: MotionOptions,
-    ) -> Result<MotionGroup> {
-        let names: Vec<CString> = targets.keys().map(|s| string(s)).collect::<Result<_>>()?;
-        let names: Vec<_> = names.iter().map(|s| s.as_ptr()).collect();
-        let positions: Vec<_> = targets.values().map(|v| v.as_ptr()).collect();
-        let counts: Vec<_> = targets.values().map(Vec::len).collect();
+    ) -> std::result::Result<MotionGroup, MotionStartError<MotionGroup>> {
+        let fan_out = FanOut::new(targets)?;
         let options = options.native()?;
-        MotionGroup::start(|out, e| unsafe {
+        MotionGroup::start_recoverable(|out, e| unsafe {
             ffi::dex_robot_move_to_joint_pos_multi(
                 self.0.as_ptr(),
-                names.as_ptr(),
-                positions.as_ptr(),
-                counts.as_ptr(),
-                names.len(),
+                fan_out.names.as_ptr(),
+                fan_out.positions.as_ptr(),
+                fan_out.counts.as_ptr(),
+                fan_out.len(),
                 &options,
                 out,
                 e,
             )
         })
+    }
+    /// Streamed-goal fan-out: one untracked goal per component, validated
+    /// all-or-none before anything is published. See
+    /// `JointComponent::stream_joint_pos`.
+    pub fn stream_joint_pos(
+        &self,
+        targets: &BTreeMap<String, Vec<f64>>,
+        options: MotionOptions,
+    ) -> Result<()> {
+        let fan_out = FanOut::new(targets)?;
+        let options = options.native()?;
+        call(|e| unsafe {
+            ffi::dex_robot_stream_joint_pos_multi(
+                self.0.as_ptr(),
+                fan_out.names.as_ptr(),
+                fan_out.positions.as_ptr(),
+                fan_out.counts.as_ptr(),
+                fan_out.len(),
+                &options,
+                e,
+            )
+        })
+    }
+    /// Deprecated alias of [`Robot::set_joint_pos`].
+    #[deprecated(since = "0.8.1", note = "use set_joint_pos")]
+    pub fn set_joint_positions(
+        &self,
+        targets: &BTreeMap<String, Vec<f64>>,
+        options: CommandOptions,
+    ) -> Result<()> {
+        self.set_joint_pos(targets, options)
+    }
+    /// Deprecated alias of [`Robot::move_to_joint_pos`].
+    #[deprecated(since = "0.8.1", note = "use move_to_joint_pos")]
+    pub fn move_to_joint_positions(
+        &self,
+        targets: &BTreeMap<String, Vec<f64>>,
+        options: MotionOptions,
+    ) -> Result<MotionGroup> {
+        self.move_to_joint_pos(targets, options)
+            .map_err(Error::from)
+    }
+    /// Deprecated: [`Robot::move_to_joint_pos`] now returns the same
+    /// `MotionStartError`, with the group when the command may have reached the robot.
+    #[deprecated(since = "0.8.1", note = "use move_to_joint_pos")]
+    pub fn move_to_joint_pos_recoverable(
+        &self,
+        targets: &BTreeMap<String, Vec<f64>>,
+        options: MotionOptions,
+    ) -> std::result::Result<MotionGroup, MotionStartError<MotionGroup>> {
+        self.move_to_joint_pos(targets, options)
+    }
+    /// Deprecated alias of [`Robot::move_to_joint_pos_recoverable`].
+    #[deprecated(since = "0.8.1", note = "use move_to_joint_pos_recoverable")]
+    pub fn move_to_joint_positions_recoverable(
+        &self,
+        targets: &BTreeMap<String, Vec<f64>>,
+        options: MotionOptions,
+    ) -> std::result::Result<MotionGroup, MotionStartError<MotionGroup>> {
+        self.move_to_joint_pos(targets, options)
+    }
+    /// Deprecated alias of [`Robot::stream_joint_pos`].
+    #[deprecated(since = "0.8.1", note = "use stream_joint_pos")]
+    pub fn stream_joint_positions(
+        &self,
+        targets: &BTreeMap<String, Vec<f64>>,
+        options: MotionOptions,
+    ) -> Result<()> {
+        self.stream_joint_pos(targets, options)
     }
     /// Best-effort submission with a per-component JSON report. A successful return
     /// means the report is available, not that every command was delivered.
@@ -69,19 +155,16 @@ impl Robot {
         targets: &BTreeMap<String, Vec<f64>>,
         options: MotionOptions,
     ) -> Result<MotionSubmission> {
-        let strings: Vec<CString> = targets.keys().map(|s| string(s)).collect::<Result<_>>()?;
-        let names: Vec<_> = strings.iter().map(|s| s.as_ptr()).collect();
-        let positions: Vec<_> = targets.values().map(|v| v.as_ptr()).collect();
-        let counts: Vec<_> = targets.values().map(Vec::len).collect();
+        let fan_out = FanOut::new(targets)?;
         let options = options.native()?;
         let mut out = ptr::null_mut();
         let result = text(|json, e| unsafe {
             ffi::dex_robot_start_joint_motions_opt(
                 self.0.as_ptr(),
-                names.as_ptr(),
-                positions.as_ptr(),
-                counts.as_ptr(),
-                names.len(),
+                fan_out.names.as_ptr(),
+                fan_out.positions.as_ptr(),
+                fan_out.counts.as_ptr(),
+                fan_out.len(),
                 &options,
                 &mut out,
                 json,
@@ -191,22 +274,23 @@ impl MotionHandle {
         call(|e| unsafe { ffi::dex_motion_wait_success(self.0.as_ptr(), &options, e) })
     }
 }
+#[derive(Debug)]
 pub struct MotionGroup(NonNull<ffi::dex_motion_group_t>);
 impl MotionGroup {
-    fn start(
+    fn start_recoverable(
         f: impl FnOnce(*mut *mut ffi::dex_motion_group_t, *mut ffi::dex_error_t) -> i32,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, MotionStartError<Self>> {
         let mut out = ptr::null_mut();
         let result = call(|e| f(&mut out, e));
-        if let Err(e) = result {
-            if !out.is_null() {
-                unsafe { ffi::dex_motion_group_release(out) }
-            }
-            return Err(e);
+        let handle = NonNull::new(out).map(Self);
+        match result {
+            Err(error) => Err(MotionStartError { error, handle }),
+            Ok(()) => handle.ok_or_else(|| invalid("Runtime returned no motion group").into()),
         }
-        Ok(Self(NonNull::new(out).ok_or_else(|| {
-            invalid("Runtime returned no motion group")
-        })?))
+    }
+    /// Explicit success wait; same contract as wait.
+    pub fn wait_success(&self, timeout: Duration) -> Result<()> {
+        self.wait(timeout)
     }
     pub fn len(&self) -> Result<usize> {
         let mut n = 0;
@@ -225,6 +309,17 @@ impl MotionGroup {
         let mut n = 0;
         call(|e| unsafe { ffi::dex_motion_group_state(self.0.as_ptr(), &mut n, e) })?;
         Ok(MotionState::from_native(n))
+    }
+    /// Wait for a terminal aggregate outcome without treating cancellation as success.
+    pub fn wait_terminal(&self, timeout: Duration) -> Result<MotionState> {
+        let wait = Wait::Timeout(timeout).native()?;
+        let mut state = 0;
+        call(|e| unsafe { ffi::dex_motion_group_wait(self.0.as_ptr(), &wait, &mut state, e) })?;
+        Ok(MotionState::from_native(state))
+    }
+    pub fn cancel_and_wait(&self, timeout: Duration) -> Result<MotionState> {
+        self.cancel()?;
+        self.wait_terminal(timeout)
     }
     pub fn cancel(&self) -> Result<()> {
         call(|e| unsafe { ffi::dex_motion_group_cancel(self.0.as_ptr(), e) })

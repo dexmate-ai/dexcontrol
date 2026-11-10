@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 //! Monitor point clouds from one 3D LiDAR.
 //!
@@ -47,7 +40,7 @@ async fn main() -> Result {
         }
         let mut index = 0;
         while samples.is_none_or(|limit| index < limit) {
-            let cloud = robot.lidar_3d(&sensor, None)?;
+            let cloud = robot.sensors().lidar_3d(&sensor, None)?;
             let range = cloud
                 .z()?
                 .iter()

@@ -1,13 +1,6 @@
 <!--
 Copyright (C) 2026 Dexmate Inc.
-
-This software is dual-licensed:
-
-1. GNU Affero General Public License v3.0 (AGPL-3.0)
-   See LICENSE-AGPL for details
-
-2. Commercial License
-   For commercial licensing terms, contact: contact@dexmate.ai
+SPDX-License-Identifier: Apache-2.0
 -->
 
 # What each example does
@@ -27,6 +20,16 @@ It is not evidence of physical execution or convergence. See `--help` for overri
 - Only tracking benchmarks write measurement files by default. Polling a sensor does not save its data. Interactive scripts continue until their documented quit/interrupt condition.
 
 ## Shared tasks
+
+### `advanced_examples/hand_guide_arms`
+
+Guide both arms by hand: yield to pushes sensed from joint current.
+
+Capture each arm's joint positions and currents at rest, then at 200 Hz treat a per-joint current offset beyond --threshold A (default 0.25) as a push and send a joint setpoint that moves with it: each joint's velocity is the push divided by a damping of 2*gain (--gain, default 0.3; larger is stiffer, below 0.3 is refused), and no tick commands a setpoint more than 0.2 rad from the measured position. By default the arms stay wherever they are pushed; --hold-pose adds a spring back to the captured pose. Run until Ctrl-C or --duration seconds (default 0, unlimited), then stop both arms. No force sensor, no model and no identification: the current threshold is the only filter, so run it on a machine wired to the robot.
+
+Connection: **control**.
+
+[Python](vega_1/python/advanced_examples/hand_guide_arms.py) · [C++](vega_1/cpp/advanced_examples/hand_guide_arms.cpp) · [Rust](vega_1/rust/src/advanced_examples/hand_guide_arms.rs) (`advanced-hand-guide-arms`)
 
 ### `advanced_examples/steer_chassis_sine`
 
@@ -256,6 +259,16 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/control/exercise_chassis.py) · [C++](vega_1/cpp/basic_examples/control/exercise_chassis.cpp) · [Rust](vega_1/rust/src/basic_examples/control/exercise_chassis.rs) (`control-exercise-chassis`)
 
+### `basic_examples/control/move_and_turn`
+
+Move the base forward 1 m, then turn 90 degrees, by measured amounts.
+
+Drive straight by --distance metres (default 1.0) with chassis.move_by, then turn in place by --angle degrees (default 90) with chassis.turn_by. Each is a closed loop on the base odometry: the base drives while the odometry is watched, slows down near the target, and corrects only if the settled error is outside the tolerance; --speed overrides the cruise speed. Print the amount measured after each motion, then the odometry pose and its sample counters. The heading comes from an enabled base IMU where the model has one (vega_1: --enable-sensor chassis_imu, optionally --yaw-source chassis_imu), otherwise from the wheels (vega_1p). Stop the base on exit.
+
+Connection: **control**.
+
+[Python](vega_1/python/basic_examples/control/move_and_turn.py) · [C++](vega_1/cpp/basic_examples/control/move_and_turn.cpp) · [Rust](vega_1/rust/src/basic_examples/control/move_and_turn.rs) (`control-move-and-turn`)
+
 ### `basic_examples/control/cycle_hand`
 
 Close one hand, then reopen it.
@@ -310,7 +323,7 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/read_2d_lidar_scan.py) · [C++](vega_1/cpp/basic_examples/sensors/read_2d_lidar_scan.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/read_2d_lidar_scan.rs) (`sensor-read-2d-lidar-scan`)
 
-- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
+- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing. Uses a read-only DiagnosticClient; simulation is supported. Motors are not initialized.
 - **cpp**: Prints numeric summaries/frame metadata; does not open a viewer.
 - **rust**: Prints numeric summaries/frame metadata; does not open a viewer.
 
@@ -324,7 +337,7 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/monitor_3d_lidar_points.py) · [C++](vega_1/cpp/basic_examples/sensors/monitor_3d_lidar_points.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/monitor_3d_lidar_points.rs) (`sensor-monitor-3d-lidar-points`)
 
-- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
+- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing. Uses a read-only DiagnosticClient; simulation is supported. Motors are not initialized.
 - **cpp**: Prints numeric summaries/frame metadata; does not open a viewer.
 - **rust**: Prints numeric summaries/frame metadata; does not open a viewer.
 
@@ -337,6 +350,8 @@ Enable lidar_3d_front, wait up to 10 s for its IMU stream, and print observation
 Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/monitor_lidar_imu.py) · [C++](vega_1/cpp/basic_examples/sensors/monitor_lidar_imu.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/monitor_lidar_imu.rs) (`sensor-monitor-lidar-imu`)
+
+- **python**: Filters undeclared IMU names before connecting. Uses a read-only DiagnosticClient; simulation is supported. Motors are not initialized.
 
 ### `basic_examples/sensors/read_arm_buttons`
 
@@ -368,7 +383,7 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/monitor_chassis_cameras.py) · [C++](vega_1/cpp/basic_examples/sensors/monitor_chassis_cameras.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/monitor_chassis_cameras.rs) (`sensor-monitor-chassis-cameras`)
 
-- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
+- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing. Uses a read-only DiagnosticClient; simulation is supported. Motors are not initialized.
 - **cpp**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 - **rust**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 
@@ -381,6 +396,8 @@ Wait up to 5 s for the right-arm wrench stream and print one observation by defa
 Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/read_arm_force_torque.py) · [C++](vega_1/cpp/basic_examples/sensors/read_arm_force_torque.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/read_arm_force_torque.rs) (`sensor-read-arm-force-torque`)
+
+- **python**: Uses a read-only DiagnosticClient; simulation is supported. Motors are not initialized.
 
 ### `basic_examples/sensors/read_hand_touch_forces`
 
@@ -402,7 +419,7 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/monitor_head_camera.py) · [C++](vega_1/cpp/basic_examples/sensors/monitor_head_camera.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/monitor_head_camera.rs) (`sensor-monitor-head-camera`)
 
-- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
+- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing. Uses a read-only DiagnosticClient; simulation is supported. Motors are not initialized.
 - **cpp**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 - **rust**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 
@@ -416,7 +433,7 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/read_imu_states.py) · [C++](vega_1/cpp/basic_examples/sensors/read_imu_states.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/read_imu_states.rs) (`sensor-read-imu-states`)
 
-- **python**: Filters undeclared IMU names before connecting.
+- **python**: Uses a read-only DiagnosticClient; simulation is supported. Motors are not initialized.
 - **cpp**: Filters undeclared IMU names before connecting.
 - **rust**: Filters undeclared IMU names before connecting.
 
@@ -430,7 +447,7 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/monitor_2d_lidar_scans.py) · [C++](vega_1/cpp/basic_examples/sensors/monitor_2d_lidar_scans.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/monitor_2d_lidar_scans.rs) (`sensor-monitor-2d-lidar-scans`)
 
-- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
+- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing. Uses a read-only DiagnosticClient; simulation is supported. Motors are not initialized.
 - **cpp**: Prints numeric summaries/frame metadata; does not open a viewer.
 - **rust**: Prints numeric summaries/frame metadata; does not open a viewer.
 
@@ -444,9 +461,9 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/read_joint_states.py) · [C++](vega_1/cpp/basic_examples/sensors/read_joint_states.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/read_joint_states.rs) (`sensor-read-joint-states`)
 
-- **python**: Prints named joint rows with model-derived units; unavailable fields appear as —. Chassis steering, wheel encoder positions and wheel speeds are listed separately. Reports nonempty joint error indices by name.
 - **cpp**: Prints named joint rows with model-derived units; unavailable fields appear as —. Chassis steering, wheel encoder positions and wheel speeds are listed separately.
 - **rust**: Prints named joint rows with model-derived units; unavailable fields appear as —. Chassis steering, wheel encoder positions and wheel speeds are listed separately. Reports nonempty joint error indices.
+- **python**: Prints named joint rows with model-derived units; unavailable fields appear as —. Chassis steering, wheel encoder positions and wheel speeds are listed separately. Reports nonempty joint error indices by name.
 
 ### `basic_examples/sensors/read_component_temperatures`
 
@@ -468,7 +485,7 @@ Connection: **control**.
 
 [Python](vega_1/python/basic_examples/sensors/monitor_wrist_cameras.py) · [C++](vega_1/cpp/basic_examples/sensors/monitor_wrist_cameras.cpp) · [Rust](vega_1/rust/src/basic_examples/sensors/monitor_wrist_cameras.rs) (`sensor-monitor-wrist-cameras`)
 
-- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing.
+- **python**: Starts/connects a Rerun viewer by default; --no-display prints instead. Missing rerun-sdk falls back to printing. Uses a read-only DiagnosticClient; simulation is supported. Motors are not initialized.
 - **cpp**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 - **rust**: Opens an owned Rerun image viewer; --no-display prints metadata and --viewer-url HOST:PORT connects to an existing viewer. Closing the window ends monitoring.
 
@@ -578,14 +595,6 @@ Using dexmotion at 250 Hz: move the right end effector +0.1 m in z in frame R_ar
 
 Connection: **control**.
 
-### [_viewer.py](vega_1/python/basic_examples/sensors/_viewer.py)
-
-Shared Rerun display helpers; not an executable example.
-
-Imported by sensor/current scripts. start() opens/connects a viewer unless --no-display is set; missing rerun-sdk falls back to printing. Running this module directly starts no viewer or robot connection.
-
-Connection: **helper**.
-
 ### [_tracking_helpers.py](vega_1/python/benchmark/arm_tracking/_tracking_helpers.py)
 
 Shared seven-joint tracking reference, CSV, and validation helpers.
@@ -593,6 +602,14 @@ Shared seven-joint tracking reference, CSV, and validation helpers.
 Imported by arm benchmarks; the reference vector is [0,0,0,-0.5,0,0,0] rad. Contains no standalone benchmark or robot connection.
 
 Connection: **helper**.
+
+### [benchmark_arm_stream.py](vega_1/python/benchmark/arm_tracking/benchmark_arm_stream.py)
+
+Benchmark each arm joint with a sine goal streamed through the motion plugin.
+
+Prompt for confirmation unless --no-confirm; move the right arm to the reference pose, stream a 0.4 rad, 0.5 Hz sine per joint for 10 s at 100 Hz with stream_joint_pos (untracked, plugin-smoothed), return to the reference between joints, and write CSV, npz and a summary plot plus per-joint RMS error, peak error and estimated lag. The hardware check for the streamed path; simulation follows the goal exactly. Uses a Robot control connection; --simulated selects the mock.
+
+Connection: **control**.
 
 ### [stress_heartbeat_gil.py](vega_1/python/benchmark/connection/stress_heartbeat_gil.py)
 

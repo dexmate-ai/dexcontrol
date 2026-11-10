@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 #pragma once
 
@@ -61,11 +54,11 @@ inline void print_frames(dexcontrol::Robot &robot, const std::vector<std::string
     if (samples && *samples < 0) throw std::invalid_argument("--samples must be non-negative");
     std::vector<std::pair<std::string, std::string>> subscribed;
     for (const auto &sensor : sensors) {
-        for (const auto &stream : streams.empty() ? robot.camera_streams(sensor) : streams) {
+        for (const auto &stream : streams.empty() ? robot.sensors().camera(sensor).streams() : streams) {
             subscribed.emplace_back(sensor, stream);
         }
     }
-    for (const auto &[sensor, stream] : subscribed) robot.camera_subscribe(sensor, stream);
+    for (const auto &[sensor, stream] : subscribed) robot.sensors().camera(sensor).subscribe(stream);
     try {
         std::map<std::string, uint64_t> previous;
         while ((!samples || *samples > 0) && !interrupted()) {
@@ -73,7 +66,7 @@ inline void print_frames(dexcontrol::Robot &robot, const std::vector<std::string
             if (viewer && !viewer->is_open()) break;
 #endif
             for (const auto &[sensor, stream] : subscribed) {
-                const auto frame = robot.camera_latest_frame(sensor, stream);
+                const auto frame = robot.sensors().camera(sensor).latest_frame(stream);
                 if (!frame) continue;
 #ifdef DEXCONTROL_WITH_VIEWER
                 if (viewer) {
@@ -95,10 +88,10 @@ inline void print_frames(dexcontrol::Robot &robot, const std::vector<std::string
             if (!samples || *samples > 0) sleep_for(period);
         }
     } catch (...) {
-        for (const auto &[sensor, stream] : subscribed) robot.camera_unsubscribe(sensor, stream);
+        for (const auto &[sensor, stream] : subscribed) robot.sensors().camera(sensor).unsubscribe(stream);
         throw;
     }
-    for (const auto &[sensor, stream] : subscribed) robot.camera_unsubscribe(sensor, stream);
+    for (const auto &[sensor, stream] : subscribed) robot.sensors().camera(sensor).unsubscribe(stream);
 }
 
 }  // namespace examples

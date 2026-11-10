@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Read or set end-effector RS485 baud rates.
 //
@@ -28,8 +21,9 @@ int main(int argc, char **argv) {
         auto robot = args.connect();
         for (const auto &name : sides) {
             auto arm = robot.joints(name + "_arm");
-            const auto result = action == "get" ? arm.ee_baud_rate() : arm.set_ee_baud_rate(baud_rate);
+            const auto result = action == "get" ? arm.get_ee_baud_rate() : arm.set_ee_baud_rate(baud_rate);
             std::cout << name << "_arm\n" << result << "\n";
         }
-    }, {"baud-rate", "side"});
+    }, {"baud-rate", "side"},
+       "action: get | set");
 }

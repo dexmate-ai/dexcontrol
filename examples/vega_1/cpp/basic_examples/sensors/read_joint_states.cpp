@@ -1,12 +1,5 @@
 // Copyright (C) 2026 Dexmate Inc.
-//
-// This software is dual-licensed:
-//
-// 1. GNU Affero General Public License v3.0 (AGPL-3.0)
-//    See LICENSE-AGPL for details
-//
-// 2. Commercial License
-//    For commercial licensing terms, contact: contact@dexmate.ai
+// SPDX-License-Identifier: Apache-2.0
 
 // Print current joint states and chassis state.
 //
@@ -65,10 +58,10 @@ int main(int argc, char **argv) {
         }
         if (robot.has_component("chassis")) {
             try {
-                auto positions = robot.chassis_steering_angle();
+                auto positions = robot.chassis().steering_angle();
                 const auto steer_count = positions.size();
-                const auto wheels = robot.chassis_wheel_encoder_pos();
-                const auto speeds = robot.chassis_wheel_velocity();
+                const auto wheels = robot.chassis().wheel_encoder_pos();
+                const auto speeds = robot.chassis().wheel_velocity();
                 positions.insert(positions.end(), wheels.begin(), wheels.end());
                 const auto &names = config["components"]["chassis"]["joints"]["names"];
                 std::cout << "\nchassis\n  " << std::left << std::setw(20) << "Joint"
